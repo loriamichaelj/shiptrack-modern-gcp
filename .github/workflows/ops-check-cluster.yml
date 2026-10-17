@@ -1,0 +1,39 @@
+name: ops-check-cluster
+
+# Proves the cluster can be reached through its DNS endpoint by the deploy account, which is the Done
+# criterion of the cluster root (design section 16). It fetches credentials on the runner, asks the
+# control plane for its version and readiness, and changes nothing. The deploy account has no
+# Kubernetes permissions until the add-ons root grants them, so those two paths, which any
+# authenticated user may read, are all it asks for. Nothing is printed that names the cluster's address.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - name: Reach the control plane through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+          kubectl get --raw /version | jq -r '"control plane " + .gitVersion'
+          kubectl get --raw /readyz
+          echo
+          echo "The cluster answers through its DNS endpoint."
