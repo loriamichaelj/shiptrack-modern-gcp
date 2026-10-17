@@ -1,0 +1,41 @@
+name: check-cost
+
+# Reads the billing export and prints the month's cost by service, by the `name` label, and by day,
+# against the monthly budget (ADR-0028). It changes nothing. It runs as the read-only plan account in
+# the `ci` environment, so the owner approves the run first, and it writes only to the job summary:
+# amounts, service names, and label values, never the project or the billing account.
+# `docs/cost/analysis.md` is written from these figures after the build (design section 13).
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "Month to report, YYYY-MM. Empty: the current month (UTC)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: ci
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_PLAN_SERVICE_ACCOUNT }}
+      - name: Report the cost
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          MONTH: ${{ inputs.month }}
+        run: .github/scripts/cost-report.sh ${MONTH:+"$MONTH"}
