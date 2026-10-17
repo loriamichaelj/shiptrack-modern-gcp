@@ -447,7 +447,7 @@ All figures are approximate monthly costs in `us-central1`, **[VERIFY against Go
 
 `docs/cost/analysis.md` records the real monthly cost from the billing export, grouped by label, and cost per 1M requests at the load profile used for AWS. It reports honestly if GCP costs more at this scale.
 
-**FinOps (ADR-0028).** A $50 monthly budget on the project alerts at 50%, 90%, and 100% of actual spend and at 100% of forecast, by email, and never stops anything. The standard usage cost export goes to a BigQuery dataset, and `check-cost` prints the month's cost by service and by label. Both are in `terraform/finops`, which no destroy workflow removes.
+**FinOps (ADR-0028).** A $50 monthly budget on the project alerts at 50%, 90%, and 100% of actual spend and at 100% of forecast, by email, and never stops anything. The standard usage cost export goes to a BigQuery dataset, and `ops-check-cost` prints the month's cost by service and by label. Both are in `terraform/finops`, which no destroy workflow removes.
 
 Cheaper options considered and rejected: a Standard zonal cluster with one Spot node (ADR-0005), Postgres inside the cluster (ADR-0008), public node addresses instead of NAT (ADR-0007).
 

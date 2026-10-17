@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Report the project's cost for one month from the billing export (ADR-0028): by service, by the `name`
-# label, by day, and against the budget. Read-only. Run by check-cost.yml as the plan account.
+# label, by day, and against the budget. Read-only. Run by ops-check-cost.yml as the plan account.
 # Usage: .github/scripts/cost-report.sh [YYYY-MM]    (default: the current month, UTC)
 #
 # The report goes to the job summary and to stdout. It holds amounts, service names, and label values,
