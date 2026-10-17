@@ -44,8 +44,13 @@ docs/
   ADR.md                decisions
 terraform/
   seed/                 state bucket, APIs, service accounts, GitHub trust, permissions
+    scripts/            ci.sh (plan and apply), github-setup.sh (environments, branch protection)
 .github/workflows/
   apply-seed.yml        applies terraform/seed
+  ci-checks.yml         pull request checks: terraform, secrets, workflows
+.checkov.yaml           checkov configuration
+.gitleaks.toml          secret scanning configuration
+.tflint.hcl             tflint configuration
 ```
 
 The `data`, `cluster`, and `addons` roots, the CI and deploy workflows, and the Helm values are described
@@ -55,10 +60,15 @@ in the design and are added phase by phase.
 
 | Phase | State |
 |---|---|
-| G0 Design | Written |
-| G4 Seed | Terraform and workflow built; the one-time setup and first run are pending |
+| G0 Design | Done: `docs/DESIGN.md` and `docs/ADR.md` |
+| G4 Seed | Done and applied: `apply-seed` ran twice, and the second run ended with "No changes". The state bucket, the five service accounts, and their trust exist. `dev` is protected, and the `seed` environment holds its secrets |
+| G8 Workflows | Partly: `ci-checks` and `apply-seed` are built. `ci-terraform`, `apply-terraform`, `deploy-app`, `ops-contract`, and the `destroy-` workflows are not. The `dev` and `ci` environments hold no secrets yet |
 | G1 to G3 Application seam, chart, image (in `shiptrack-modern`) | Not started |
-| G5 to G11 Data, cluster, addons, workflows, validation, operations | Not started |
+| G5 to G7 Data, cluster, and addons roots | Not started |
+| G9 to G11 Application, validation, operations | Not started |
+
+Decisions still waiting on the user are the entries marked Planned in [`docs/ADR.md`](docs/ADR.md),
+chiefly Spot pods (ADR-0005) and no public ingress (ADR-0013). They gate the data and cluster roots.
 
 Phases are applied in order. The phase table in [`docs/DESIGN.md`](docs/DESIGN.md) §16 gives each
 phase's "Done when".

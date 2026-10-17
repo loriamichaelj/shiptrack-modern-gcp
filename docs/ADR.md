@@ -19,7 +19,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0013 | `no-public-ingress-by-default` | Planned |
 | 0014 | `observability-stack` | Planned |
 | 0015 | `deploy-by-workflow` | Accepted |
-| 0016 | `state-in-cloud-storage` | Planned |
+| 0016 | `state-in-cloud-storage` | Accepted |
 | 0017 | `secrets-out-of-state` | Accepted |
 | 0018 | `db-connection-budget` | Planned |
 | 0019 | `gcp-is-a-standalone-environment` | Accepted |
@@ -317,7 +317,7 @@ A unit test asserts that the pool settings times the replica maximums in `values
 
 **Context:** `dev` is the integration branch, and the `dev` and `seed` environments admit only it. Whatever reaches `dev` can be applied to GCP after an approval, so an unreviewed push to `dev` would put unreviewed code in front of the approvals. The platform repository already protects `dev`; this repository had no protection.
 
-**Decision:** Protect `dev` with a branch protection rule: changes arrive only by pull request, administrators included (`enforce_admins`), with no force push, no deletion, and conversations resolved before merge. The rule requires no approving review, because the user is the only reviewer and cannot approve their own pull request, and it names no required status checks yet, because no check workflow exists. The checks are added with `--check` when `ci-checks` and `ci-terraform` exist (design §10). `terraform/seed/scripts/github-setup.sh` holds the same settings, so a re-run keeps the rule.
+**Decision:** Protect `dev` with a branch protection rule: changes arrive only by pull request, administrators included (`enforce_admins`), with no force push, no deletion, and conversations resolved before merge. The rule requires no approving review, because the user is the only reviewer and cannot approve their own pull request, and it requires the `ci-checks` jobs `terraform`, `secrets`, and `workflows`. `ci-terraform`'s check is added with `--check` when that workflow exists (design §10). `terraform/seed/scripts/github-setup.sh` holds the same settings, so a re-run keeps the rule.
 
 **Consequences:** Every change, including the user's, goes through a short-lived branch and a pull request, as the parent rules already require. There is no bypass for an emergency fix; the rule has to be loosened in the GitHub settings first and restored after. Pull requests are still merged by the user, so the rule stops accidents and unreviewed pushes, not the user's own merge.
 
