@@ -1,0 +1,18 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+override.tf
+override.tf.json
+*.auto.tfvars
+*.tfvars
+
+# Written by terraform/bootstrap/scripts/ci.sh at run time; names the state bucket
+backend.tf
+
+# Local environment and editor files
+.env
+.DS_Store
