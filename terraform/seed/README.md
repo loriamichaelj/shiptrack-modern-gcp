@@ -14,7 +14,7 @@ design and `docs/ADR.md` (ADR-0002, ADR-0024) for the decisions.
 |---|---|
 | State bucket | `shiptrack-tfstate-<project number>`: versioning, uniform access, public access prevention, newest ten versions kept |
 | Project APIs | Everything the later roots need |
-| `shiptrack-plan` | Pull requests and the `dev` branch. Reads the project and the state; cannot change either |
+| `shiptrack-plan` | The `ci` environment (pull request checks). Reads the project and the state; cannot change either |
 | `shiptrack-apply` | The `dev` environment. Administers network, cluster, database, queues, secrets, buckets, and monitoring. Cannot change project IAM or create service accounts |
 | `shiptrack-deploy` | The `dev` environment. Fetches cluster credentials; every cluster permission is Kubernetes RBAC |
 | `shiptrack-gke-node` | Identity of the GKE nodes |
@@ -98,8 +98,9 @@ terraform/seed/scripts/github-setup.sh --dry-run --seed-env $ORG/shiptrack-moder
 terraform/seed/scripts/github-setup.sh --seed-env $ORG/shiptrack-modern-gcp
 ```
 
-It creates the `dev` and `seed` environments with you as the required reviewer and `dev` as the
-only branch allowed to deploy, protects the `dev` branch so changes arrive by pull request, makes
+It creates the `dev`, `ci`, and `seed` environments with you as the required reviewer. `dev` and
+`seed` admit only the `dev` branch; `ci` runs pull request checks, so it has approval and no branch
+rule. It protects the `dev` branch so changes arrive by pull request, makes
 the default workflow token read-only, requires approval for every outside contributor's workflow,
 and turns on secret scanning and push protection.
 
@@ -137,9 +138,9 @@ creating anything else. Later runs use the bucket directly, and a run with no ch
 
 ## Wiring the other workflows
 
-After the first apply, give the repository the accounts the other workflows use. The plan workflow
-runs on pull requests, outside any environment, so its values are repository secrets. Apply and
-deploy values belong to the `dev` environment.
+After the first apply, give the repository the accounts the other workflows use. Every workflow runs
+in an environment that needs your approval, so each set of values belongs to its environment: the plan
+account to `ci` (pull request checks), and the apply and deploy accounts to `dev`.
 
 ```sh
 sa() { echo "shiptrack-$1@$PROJECT_ID.iam.gserviceaccount.com"; }
@@ -147,7 +148,7 @@ PROVIDER="projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github
 
 for s in GCP_PROJECT_ID:"$PROJECT_ID" GCP_PROJECT_NUMBER:"$PROJECT_NUMBER" \
          GCP_WORKLOAD_IDENTITY_PROVIDER:"$PROVIDER" GCP_PLAN_SERVICE_ACCOUNT:"$(sa plan)"; do
-  gh secret set "${s%%:*}" -R $ORG/shiptrack-modern-gcp --body "${s#*:}"
+  gh secret set "${s%%:*}" --env ci -R $ORG/shiptrack-modern-gcp --body "${s#*:}"
 done
 for s in GCP_PROJECT_ID:"$PROJECT_ID" GCP_PROJECT_NUMBER:"$PROJECT_NUMBER" \
          GCP_WORKLOAD_IDENTITY_PROVIDER:"$PROVIDER" GCP_APPLY_SERVICE_ACCOUNT:"$(sa apply)" \
@@ -164,12 +165,15 @@ exact subject from this table, where the prefix is `repo:<ORG>@<OWNER_ID>/shiptr
 | Service account | Subject suffix |
 |---|---|
 | `shiptrack-seed` (by hand) | `:environment:seed` |
-| `shiptrack-plan` | `:pull_request`, `:ref:refs/heads/dev` |
+| `shiptrack-plan` | `:environment:ci` |
 | `shiptrack-apply` | `:environment:dev` |
 | `shiptrack-deploy` | `:environment:dev` |
 
+Every subject names an environment that needs your approval, so no job reaches an account unapproved.
 `apply` and `deploy` share a subject, so either can be requested by any job in the `dev` environment.
 The workflows, which reach `dev` only through a reviewed pull request, choose which one they use.
+`ci` admits any branch, because a pull request run has a pull request ref; the plan account is
+read-only, and you see the run before approving it (ADR-0025).
 
 ## State layout
 

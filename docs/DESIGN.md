@@ -260,7 +260,7 @@ The user creates these once, because the first run needs them to exist. The comm
 2. The five APIs the federation needs: IAM, IAM Credentials, Security Token Service, Resource Manager, and Service Usage.
 3. A Workload Identity pool and an OIDC provider for `https://token.actions.githubusercontent.com`. The subject is the token's `sub` claim. The attribute condition matches the numeric repository ID and the numeric owner ID, so a renamed or transferred repository, or any other repository, cannot authenticate.
 4. The seed service account `shiptrack-seed`, with the roles the seed root needs, and one trust binding: only the subject `…:environment:seed` can impersonate it.
-5. The GitHub environments `seed` and `dev` (the user as required reviewer, `dev` the only branch allowed to deploy), branch protection, and the secrets the workflows read, from `terraform/seed/scripts/github-setup.sh` and the README.
+5. The GitHub environments `seed`, `ci`, and `dev` (the user as required reviewer on each; `seed` and `dev` admit only the `dev` branch, `ci` admits pull request runs), branch protection, and the secrets the workflows read, from `terraform/seed/scripts/github-setup.sh` and the README.
 
 The state bucket, the other service accounts, their trust, and their permissions are not by hand: the workflow creates them (§8.1).
 
@@ -272,7 +272,7 @@ Applied by the `apply-seed` workflow as the seed service account. Both its jobs 
 | State bucket | `shiptrack-tfstate-<project number>` in `us-central1`: uniform access, public access prevention enforced, versioning on, the newest ten versions kept, labeled, `prevent_destroy` |
 | Project services | Every API the other roots need: compute, container, sqladmin, servicenetworking, pubsub, secretmanager, storage, monitoring, logging, and the five from §8.0 |
 | Service accounts | `shiptrack-plan`, `shiptrack-apply`, `shiptrack-deploy`, `shiptrack-gke-node`, and `shiptrack-proof-of-delivery`. All are created here, so no later account needs to create service accounts |
-| Trust | One `workloadIdentityUser` binding per exact subject. `plan`: `…:pull_request` and `…:ref:refs/heads/dev`. `apply` and `deploy`: `…:environment:dev`. A job outside the approved environment cannot become `apply` or `deploy` |
+| Trust | One `workloadIdentityUser` binding per exact subject. `plan`: `…:environment:ci`. `apply` and `deploy`: `…:environment:dev`. Every subject names an environment that needs the user's approval (ADR-0025). A job outside the approved environment cannot become `plan`, `apply`, or `deploy` |
 | Plan roles | `viewer`, `iam.securityReviewer`, `serviceusage.serviceUsageConsumer`, and `storage.objectViewer` on the state bucket. Plans run with `-lock=false`, so they never write state |
 | Apply roles | Admin roles for Cloud SQL, networking, GKE, logging configuration, monitoring, Pub/Sub, Secret Manager, Service Networking, and Cloud Storage; `serviceusage.serviceUsageConsumer`; `storage.objectUser` on the state bucket; `serviceAccountUser` on `shiptrack-gke-node`; `serviceAccountAdmin` on `shiptrack-proof-of-delivery` only. No project-level IAM admin and no service account admin on the project (ADR-0022) |
 | Deploy roles | `container.clusterViewer` to fetch credentials through the DNS endpoint, and `serviceusage.serviceUsageConsumer`. All cluster permissions are Kubernetes RBAC in one namespace (§8.4) |
@@ -324,8 +324,8 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 
 | Workflow | Trigger | Does |
 |---|---|---|
-| `ci-checks` | pull request | Static checks (§10) |
-| `ci-terraform` | pull request | `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
+| `ci-checks` | pull request | Static checks (§10), in environment `ci` |
+| `ci-terraform` | pull request | In environment `ci`, `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
 | `apply-seed` | dispatch | Applies `terraform/seed` as the seed account: two jobs in the `seed` environment, plan then apply, each approved (§8.1) |
 | `apply-terraform` | dispatch | `apply` in the order `data`, `cluster`, `addons` as `shiptrack-apply`, in the `dev` environment with approval |
 | `deploy-app` | dispatch with a digest | Deploy (below) |
@@ -353,14 +353,14 @@ The suite needs no change. `ops-contract` runs it from a GitHub-hosted runner wi
 
 ## 10. CI
 
-`ci-checks.yml`, on pull requests, all jobs required:
+`ci-checks.yml`, on pull requests, all jobs required. Every job runs in environment `ci`, so the user approves each run before any job starts (ADR-0025):
 
 | Job | Steps |
 |---|---|
 | `terraform` | Per root: `terraform fmt -check`, `init -backend=false`, `validate`, `tflint`; `checkov`; `trivy config` |
 | `chart` | Check out `shiptrack-modern` at the pinned commit; `helm lint`; `helm template` with `values-gcp.yaml` and a dummy digest; `kubeconform -strict`; `checkov` on the render |
 | `secrets` | `gitleaks`, with custom rules for project numbers, service account emails, and Workload Identity resource names, plus a scrub of any standalone 12-digit number, which is the shape of a project number. Generated lock files, whose hashes contain digit runs, are allowlisted, as in `shiptrack-platform` |
-| `workflows` | `actionlint`; all actions pinned to SHAs |
+| `workflows` | `actionlint`; all actions pinned to SHAs; every job in every workflow names an `environment:` |
 
 `ci-checks` and `ci-terraform` use no credentials except the plan account's read-only token, and only in `ci-terraform`.
 
@@ -513,7 +513,7 @@ Still to confirm at build time:
 - [ ] The Workload Identity provider's claim names and attribute condition with numeric repository and owner IDs
 - [ ] The IAM condition that limits which roles `projectIamAdmin` can grant
 - [ ] Signing a V4 URL through the IAM signing API from a pod with no Google service account, and the roles it needs
-- [ ] That the `:environment:`, `:pull_request`, and `:ref:` subject suffixes are unchanged from the default format, as on the AWS repositories (the first run of `apply-seed` shows it; a mismatch appears as a failed authentication)
+- [ ] That the `:environment:` subject suffix is unchanged from the default format, as on the AWS repositories (the first run of `apply-seed` shows it; a mismatch appears as a failed authentication)
 - [ ] `gcloud storage buckets describe` on a missing bucket reports 404 from the runner, with the credentials the auth action writes (the first run of `apply-seed`)
 - [ ] The roles the `gcs` backend needs on the state bucket (`storage.objectUser` for apply, `storage.objectViewer` with `-lock=false` for plan)
 - [ ] `roles/container.defaultNodeServiceAccount` is sufficient for Autopilot nodes, and `roles/container.clusterViewer` carries the permission to connect through the DNS endpoint

@@ -28,6 +28,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0022 | `no-iam-administration-for-the-apply-account` | Planned |
 | 0023 | `proof-of-delivery-is-spelled-out` | Accepted |
 | 0024 | `seed-by-workflow` | Accepted |
+| 0025 | `approval-on-every-workflow` | Accepted |
+| 0026 | `no-direct-push-to-dev` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -45,7 +47,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 **Context:** The user will use GitHub OIDC. The organization forbids creating or uploading service account keys, so a key is not an option even if wanted. The user is Owner on the project and administers the organization, so role grants and federation are possible, which is unlike Azure.
 
-**Decision:** GitHub Actions authenticates through a Workload Identity pool and an OIDC provider for GitHub, and impersonates one of three service accounts: `shiptrack-plan` (pull requests, read-only), `shiptrack-apply` (Terraform, environment `dev`), and `shiptrack-deploy` (Helm, environment `dev`). Each binding names one exact subject, not a repository: `apply` and `deploy` are reachable only from the `dev` environment, which needs the user's approval; `plan` from pull requests and the `dev` branch. The subjects use the immutable format that the AWS repositories already use, `repo:<owner>@<owner id>/<repo>@<repo id>:<suffix>`, built from the workflow context. The provider's attribute condition matches the repository and owner by numeric ID, so a renamed or transferred repository, or any other repository, cannot authenticate. A seed account `shiptrack-seed`, reachable only from the `seed` environment, applies the seed root (ADR-0024).
+**Decision:** GitHub Actions authenticates through a Workload Identity pool and an OIDC provider for GitHub, and impersonates one of three service accounts: `shiptrack-plan` (pull request checks, read-only), `shiptrack-apply` (Terraform, environment `dev`), and `shiptrack-deploy` (Helm, environment `dev`). Each binding names one exact subject, not a repository: `apply` and `deploy` are reachable only from the `dev` environment, and `plan` only from the `ci` environment (ADR-0025); each needs the user's approval. The subjects use the immutable format that the AWS repositories already use, `repo:<owner>@<owner id>/<repo>@<repo id>:<suffix>`, built from the workflow context. The provider's attribute condition matches the repository and owner by numeric ID, so a renamed or transferred repository, or any other repository, cannot authenticate. A seed account `shiptrack-seed`, reachable only from the `seed` environment, applies the seed root (ADR-0024).
 
 **Consequences:** No long-lived GCP credential exists in GitHub or git. The pool, provider, seed account, and GitHub environments are created by hand once (design §8.0, `terraform/seed/README.md`). The state bucket, the other accounts, their trust, and their permissions come from the seed workflow. Service accounts are named `shiptrack-<purpose>`; the AWS `<PREFIX>` rule does not apply. `apply` and `deploy` share the `dev` subject, so the environment's deployment-branch rule (only the reviewed `dev` branch) is what separates them from a workflow on another branch, as on AWS (design risk G-R15). The subject format for this repository is confirmed before the first run **[VERIFY]**.
 
@@ -297,3 +299,23 @@ A unit test asserts that the pool settings times the replica maximums in `values
 **Decision:** The `apply-seed` workflow applies `terraform/seed` as `shiptrack-seed`. It has two jobs in the `seed` environment, plan and apply, each needing the user's approval, so the plan summary (addresses and actions, never values) is read before anything is applied. It creates the state bucket, the project's APIs, the five service accounts, the trust bindings that let GitHub subjects impersonate three of them, and their role bindings (design §8.1). On the first run `scripts/ci.sh` creates only the bucket with local state, writes `backend.tf`, and migrates the state into the bucket before creating the rest, as on AWS. The user creates the pool, provider, seed account, and GitHub environments by hand once, with the commands in `terraform/seed/README.md`. The workflow runs only on `dev`; its actions are pinned to commit SHAs; it uploads no plan file.
 
 **Consequences:** Nothing is applied from a workstation. Everything after the by-hand step is reviewed and approved in GitHub. The first approval covers creating the bucket if it is missing, and the summary of the first run lists only that bucket. A failure between creating the bucket and migrating the state is recoverable from the README. The workflow was validated locally with `actionlint`, `terraform validate`, and an offline plan with dummy identifiers; its first real run is the first test of the runner's `gcloud` credentials and of the subject format **[VERIFY]**.
+
+## ADR-0025: approval-on-every-workflow
+
+**Status:** Accepted
+
+**Context:** The user wants every workflow in this repository to wait for their approval, including pull request checks. The design had `ci-checks` and `ci-terraform` run on pull requests with no environment, and `shiptrack-plan` trusted the `:pull_request` and `:ref:refs/heads/dev` subjects, which no approval gates. The `dev` and `seed` environments admit only the `dev` branch, so a pull request run cannot use them: its ref is a pull request ref.
+
+**Decision:** Add a third environment, `ci`, with the user as required reviewer and no deployment-branch rule. Every job of `ci-checks` and `ci-terraform` runs in `ci`. `shiptrack-plan` trusts one subject, `…:environment:ci`, in place of the two it had, so no job reaches any service account without an approval. The `workflows` job in `ci-checks` fails any workflow job that names no `environment:`. `github-setup.sh` creates `ci`, and the plan account's secrets live in `ci`. The other approval settings stay: `dev` and `seed` for applies and deploys, and approval for every outside contributor's workflow.
+
+**Consequences:** Pull request checks are pending until approved, once per workflow run for the jobs that wait together. A new push needs a new approval, and Dependabot's pull requests wait too. The approval is the user's, so the review of a pull request's workflow changes happens before its code runs with the plan account's token. Because `ci` has no branch rule, a pull request that edits a workflow can ask for the plan account once approved, which is why the user reads the workflow diff before approving, and why the plan account is read-only. Fork pull requests get no OIDC token and no environment secrets, so they can run only the checks that need none. Whether an environment with no branch rule accepts pull request refs, and whether jobs of one run approve together, is checked on the first pull request **[VERIFY]**.
+
+## ADR-0026: no-direct-push-to-dev
+
+**Status:** Accepted
+
+**Context:** `dev` is the integration branch, and the `dev` and `seed` environments admit only it. Whatever reaches `dev` can be applied to GCP after an approval, so an unreviewed push to `dev` would put unreviewed code in front of the approvals. The platform repository already protects `dev`; this repository had no protection.
+
+**Decision:** Protect `dev` with a branch protection rule: changes arrive only by pull request, administrators included (`enforce_admins`), with no force push, no deletion, and conversations resolved before merge. The rule requires no approving review, because the user is the only reviewer and cannot approve their own pull request, and it names no required status checks yet, because no check workflow exists. The checks are added with `--check` when `ci-checks` and `ci-terraform` exist (design §10). `terraform/seed/scripts/github-setup.sh` holds the same settings, so a re-run keeps the rule.
+
+**Consequences:** Every change, including the user's, goes through a short-lived branch and a pull request, as the parent rules already require. There is no bypass for an emergency fix; the rule has to be loosened in the GitHub settings first and restored after. Pull requests are still merged by the user, so the rule stops accidents and unreviewed pushes, not the user's own merge.
