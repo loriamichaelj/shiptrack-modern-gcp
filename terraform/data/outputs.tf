@@ -25,3 +25,26 @@ output "private_services_range_name" {
   description = "Name of the range reserved for Cloud SQL."
   value       = module.network.private_services_range_name
 }
+
+# Read by the cluster root, which grants each workload its access (ADR-0029). None of these is secret,
+# and no workflow prints them.
+output "topics" {
+  description = "Pub/Sub topic names by flow."
+  value       = module.pubsub.topics
+}
+
+output "subscriptions" {
+  description = "Pub/Sub subscription names by flow."
+  value       = module.pubsub.subscriptions
+}
+
+output "secret_ids" {
+  description = "Secret IDs by account: app, migrator, and admin."
+  value       = module.secrets.secret_ids
+}
+
+output "proof_of_delivery_bucket" {
+  description = "Name of the proof-of-delivery bucket. Sensitive so that no run prints it."
+  value       = module.proof_of_delivery_storage.bucket_name
+  sensitive   = true
+}
