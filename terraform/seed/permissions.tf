@@ -10,8 +10,10 @@ locals {
       "roles/viewer",
       "roles/iam.securityReviewer", # reads IAM policies, which viewer does not
       "roles/serviceusage.serviceUsageConsumer",
+      "roles/bigquery.jobUser", # runs the read-only cost queries of check-cost over the billing export
     ]
     apply = [
+      "roles/bigquery.admin", # the billing export dataset (ADR-0028)
       "roles/cloudsql.admin",
       "roles/compute.networkAdmin",
       "roles/container.admin",

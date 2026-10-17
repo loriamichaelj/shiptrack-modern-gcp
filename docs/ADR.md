@@ -31,6 +31,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0025 | `approval-on-every-workflow` | Accepted |
 | 0026 | `no-direct-push-to-dev` | Accepted |
 | 0027 | `destroy-workflow-per-cost-bearing-resource` | Accepted |
+| 0028 | `finops-budget-and-cost-export` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -353,3 +354,20 @@ Each run has two jobs, both in `dev` and each needing the user's approval, as `a
 The protections are lowered inside the approved run, never left off. Resources use their provider attributes (`deletion_protection`, `force_destroy`) from variables that default to protected. Before the destroy, the job applies the targeted change with the variable set to unprotected, because the provider reads the stored value on delete, then destroys. A normal apply sets the protection back for anything that remains. `prevent_destroy` is not used on resources that have a destroy workflow, because a lifecycle argument cannot be switched by a run. It stays on the state bucket, which is outside every destroy workflow.
 
 **Consequences:** Spend can be stopped one group at a time, by two approvals and a typed name, and the cluster or database can be removed without touching the rest. Destroying a group that another root depends on fails at Google, not silently: remove them in reverse order (addons, cluster, then the data groups, with Cloud SQL before the network). Destroying Cloud SQL deletes its data and its backups; its summary says so. A deleted Cloud SQL instance name cannot be reused for some time **[VERIFY]**, so the instance name carries a random suffix. A non-empty bucket is deleted only because the run sets `force_destroy`, which is why the storage workflow exists separately. `-target` is the documented tool for this and is used only here, never in `apply-terraform`. Whether `-destroy -target` with an in-run unprotect behaves as described for each resource type is checked when each workflow is first built **[VERIFY]**. The `workflows` CI job already enforces that each destroy workflow names an environment and pins its actions.
+
+## ADR-0028: finops-budget-and-cost-export
+
+**Status:** Accepted
+
+**Context:** Cost is a design constraint (ADR-0003), the baseline is about $25 to $35 a month (design §13), and every figure there is a remembered price marked [VERIFY]. Nothing yet tells the owner when the real bill leaves that range, or records what it is. This project is the only one on its billing account, so the account's spend is the project's spend. The labels `environment` and `name` are on every resource that takes them (ADR-0003) so that the bill can be grouped by them.
+
+**Decision:** Three pieces, none of which can create spend of its own:
+- **A budget with alerts.** A Cloud Billing budget of $50 a month on this project, which is about 1.5 times the baseline. It alerts at 50% ($25), 90% ($45), and 100% ($50) of actual spend, and at 100% of forecast spend. Credits count, so the GKE free-tier credit (design §13) reduces the figure the budget watches. Alerts go to an email notification channel whose address is a masked secret, and also to the billing account's default recipients. A budget alerts and never stops anything.
+- **A billing export.** The standard usage cost export goes to a small BigQuery dataset created in Terraform. The export itself is switched on by hand in the billing console, because it is not part of the Terraform provider **[VERIFY]**. `check-cost`, a read-only workflow, queries the dataset and prints the month's cost by service and by the `name` label to its summary. `docs/cost/analysis.md` is written from it after the build (design §13).
+- **A separate root.** Both live in `terraform/finops`, not in `data`, so that taking the data groups down does not remove the budget or the cost history. It has no destroy workflow, like the seed root: a budget and a month of billing rows are not what a destroy workflow is for.
+
+Two roles on the billing account are granted by hand, once, because billing account permissions are outside the project and the seed root cannot give them: `roles/billing.costsManager` to `shiptrack-apply` (it creates the budget) and `roles/billing.viewer` to `shiptrack-plan` (it reads the budget when planning) **[VERIFY that the viewer role includes budget read]**. The seed root adds `bigquery.googleapis.com` and `billingbudgets.googleapis.com` to the enabled APIs, `roles/bigquery.admin` to the apply account for the dataset, and `roles/bigquery.jobUser` to the plan account for the queries. The dataset gives the plan account `roles/bigquery.dataViewer` on it only.
+
+No automatic stop. A rule that scales the cluster to zero or detaches billing when a budget is crossed needs a Pub/Sub trigger, a function, and an account that can change billing, and it can take down a demo that has to stay up. The owner gets the alert and runs the `destroy-` workflows (ADR-0027).
+
+**Consequences:** Alerts arrive after the money is spent, with up to a day of delay in the billing data. The budget and the cost history survive a full teardown. BigQuery storage for one project's rows is far under the 10 GiB free tier, and the queries are far under the free 1 TiB a month **[VERIFY]**. Two by-hand grants and one by-hand console step are the price of keeping billing permissions off the pipelines. The email address sits in the state bucket as a channel label, which only the three pipeline accounts can read.

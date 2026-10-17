@@ -3,6 +3,8 @@
 
 locals {
   services = toset([
+    "bigquery.googleapis.com",
+    "billingbudgets.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "container.googleapis.com",

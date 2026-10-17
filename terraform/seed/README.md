@@ -157,6 +157,30 @@ for s in GCP_PROJECT_ID:"$PROJECT_ID" GCP_PROJECT_NUMBER:"$PROJECT_NUMBER" \
 done
 ```
 
+## Billing (by hand, for the cost budget)
+
+The budget and the cost report (ADR-0028) need two roles on the billing account. Billing account
+permissions are outside the project, so the seed root cannot grant them. Run once, after the first
+`apply-seed` that creates the accounts:
+
+```sh
+BILLING_ACCOUNT=$(gcloud billing projects describe $PROJECT_ID --format='value(billingAccountName)' | sed 's#billingAccounts/##')
+gcloud billing accounts add-iam-policy-binding $BILLING_ACCOUNT \
+  --member "serviceAccount:shiptrack-apply@$PROJECT_ID.iam.gserviceaccount.com" --role roles/billing.costsManager
+gcloud billing accounts add-iam-policy-binding $BILLING_ACCOUNT \
+  --member "serviceAccount:shiptrack-plan@$PROJECT_ID.iam.gserviceaccount.com" --role roles/billing.viewer
+```
+
+`costsManager` lets `shiptrack-apply` create the budget. `viewer` lets `shiptrack-plan` read it when it
+plans. Neither role can change who has access to the account or link a project to it.
+
+Then give the `ci` and `dev` environments the two values the finops root needs, as secrets:
+`GCP_BILLING_ACCOUNT_ID` (the value of `$BILLING_ACCOUNT`) and `GCP_ALERT_EMAIL` (where budget alerts go).
+
+After the finops root is applied, switch on the standard usage cost export in the billing console
+(Billing, Billing export, BigQuery export), pointing at the dataset `shiptrack_billing_export` in the
+shiptrack project. Terraform creates the dataset; it cannot switch the export on.
+
 ## Trust policies
 
 Every service account trusts the GitHub provider through a `workloadIdentityUser` binding on one

@@ -76,6 +76,7 @@ in the design and are added phase by phase.
 | G3 Image (in `shiptrack-modern`) | Not started |
 | G5 Data root | In progress: the network, Cloud SQL, and the database secrets are built and not yet applied. Pub/Sub, the bucket, and the workload bindings follow |
 | G6 to G7 Cluster and addons roots | Not started |
+| FinOps (ADR-0028) | In progress: the APIs and roles are in the seed root (this needs an `apply-seed` run). The budget, the cost export dataset, and `check-cost` follow |
 | G9 to G11 Application, validation, operations | Not started |
 
 Decisions still waiting on the user are the entries marked Planned in [`docs/ADR.md`](docs/ADR.md),
