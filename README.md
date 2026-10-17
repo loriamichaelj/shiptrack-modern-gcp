@@ -68,7 +68,7 @@ in the design and are added phase by phase.
 | G9 to G11 Application, validation, operations | Not started |
 
 Decisions still waiting on the user are the entries marked Planned in [`docs/ADR.md`](docs/ADR.md),
-chiefly Spot pods (ADR-0005) and no public ingress (ADR-0013). They gate the data and cluster roots.
+such as the network, database, and observability choices. They gate the data and cluster roots.
 
 Phases are applied in order. The phase table in [`docs/DESIGN.md`](docs/DESIGN.md) §16 gives each
 phase's "Done when".
