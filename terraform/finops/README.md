@@ -5,7 +5,7 @@ remove the budget or the cost history, and no `destroy-` workflow removes it.
 
 | File | Holds |
 |---|---|
-| `budget.tf` | A $50 monthly budget on the project that alerts at 50%, 90%, and 100% of actual spend and at 100% of forecast, to an email channel and to the billing account's default recipients. It never stops anything |
+| `budget.tf` | A $75 monthly budget on the project that alerts at 50%, 90%, and 100% of actual spend and at 100% of forecast, to an email channel and to the billing account's default recipients. It never stops anything |
 | `cost_export.tf` | The BigQuery dataset the standard usage cost export writes to, and read access to it for the plan account |
 
 ## Inputs

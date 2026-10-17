@@ -19,6 +19,7 @@ locals {
       "roles/container.admin",
       "roles/logging.configWriter",
       "roles/monitoring.editor",
+      "roles/compute.securityAdmin", # the Cloud Armor policy of the UI load balancer (ADR-0031)
       "roles/pubsub.admin",
       "roles/secretmanager.admin",
       "roles/servicenetworking.networksAdmin",

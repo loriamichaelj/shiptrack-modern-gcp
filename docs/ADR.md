@@ -34,6 +34,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0028 | `finops-budget-and-cost-export` | Accepted |
 | 0029 | `workload-bindings-follow-the-cluster` | Accepted |
 | 0030 | `db-init-runs-the-app-image` | Accepted |
+| 0031 | `ui-url-through-a-global-load-balancer` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -170,7 +171,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0013: no-public-ingress-by-default
 
-**Status:** Accepted
+**Status:** Accepted. The optional Gateway it describes was built, as a global load balancer with the allow-list it asked for, in ADR-0031.
 
 **Context:** Any public address on GCP goes through a load balancer forwarding rule at $0.025 per hour, about $18 a month, which is more than the compute. Restricting it to allow-listed addresses needs Cloud Armor, about $6 more **[VERIFY both]**. GCP is a standalone environment outside the AWS cutover (ADR-0019), so nothing requires an address.
 
@@ -393,3 +394,17 @@ No automatic stop. A rule that scales the cluster to zero or detaches billing wh
 **Decision:** The Job runs `python -m shiptrack db-init` from the release's own image (shiptrack-modern ADR-0035). The command reads the three credentials through the application's secret source and runs `db/init.sql`, which is in the image. `shiptrack-db-init` is bound as `secretAccessor` on the administrator's, the application's, and the migrator's secrets, each on the single secret. The Job manifest and its service account are in `deploy/db-init/`, and `deploy-app` applies the service account and creates the Job. The roles' connection limits come from the connection budget (ADR-0018): 18 for the application and 3 for the migrator.
 
 **Consequences:** There is one image on every cloud and nothing extra to pull or pin. The command is tested against PostgreSQL in `shiptrack-modern`. The cluster root makes 13 workload bindings instead of 11, two more on the db-init principal, and applying it adds them. A rotation is a raise of `db_credentials_version` in the data root, an apply, and a run of `deploy-app`, whose db-init Job resets both passwords. Cloud SQL's own role setup is proven only by the first run **[VERIFY]**.
+
+## ADR-0031: ui-url-through-a-global-load-balancer
+
+**Status:** Accepted
+
+**Context:** ADR-0013 left the application reachable only through `kubectl port-forward` and sketched an optional regional load balancer, for a demonstration that needs a URL in a browser, from one person's address. The API has no login, so anyone who can reach it can create and change shipments: the URL must admit only the owner. A regional external Application Load Balancer can issue a Google-managed certificate only by DNS authorization, which needs a CNAME in the DNS of the hostname, and there is no domain here. A global external Application Load Balancer authorizes the certificate by the address that serves it, so a free sslip.io hostname (the address with dashes, which resolves to it) works without a DNS record **[VERIFY that Google issues a certificate for it]**.
+
+**Decision:** A global external Application Load Balancer, created by a GKE Gateway (`gke-l7-global-external-managed`) with one HTTPS listener on 443 and no port 80, so there is one forwarding rule and the plain-HTTP address is closed. Terraform (the `ui-ingress` module in the data root) reserves a global address, creates a Google-managed certificate for `<address with dashes>.sslip.io`, and creates a Cloud Armor policy that denies everyone and has one allow rule. The Gateway, the route, a health check on `/readyz`, a backend policy that attaches the Cloud Armor policy, and a network policy that admits Google's front ends to port 8000 are in `deploy/gateway` and are applied by `deploy-app`. The deploy account's role in the namespace gains those object kinds.
+
+The allow rule holds an unroutable documentation address (192.0.2.1/32) until it is opened. The `ops-ui-port` workflow reads the range from the `GCP_UI_ALLOWED_CIDRS` secret of the `dev` environment, which is masked before any step runs and is never a workflow input, because inputs are shown on a public run page. `open` puts the secret's range in the rule and `close` puts the unroutable one back; `remove` deletes the Gateway so the load balancer and its charge go. Changing the owner's address is a change to the secret (`scripts/ui-access.sh` does it from the owner's machine) and an `open`. Terraform ignores the rule's range. `destroy-ingress` removes the address, the certificate, and the policy, after `remove`.
+
+The monthly budget moves from $50 to $75 (ADR-0028), because the baseline of about $25 to $35 gains about $24.
+
+**Consequences:** The URL is `https://<address with dashes>.sslip.io/ui/`, shown to the owner by `scripts/ui-access.sh url` and never in a public log. The certificate can take up to an hour to become active after the Gateway exists. Closed means every request gets 403 from Cloud Armor, and the load balancer is still billed until `remove`. The sslip.io name depends on a third-party public DNS service; if that is unwanted, a domain of the owner's can replace it with one A record. The apply account gains `roles/compute.securityAdmin` for the policy, which needs an `apply-seed` run. Behavior of the Gateway controller with the named address, the pre-shared certificate, and the backend policy is proven only by the first deploy **[VERIFY]**.

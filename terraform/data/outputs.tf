@@ -48,3 +48,12 @@ output "proof_of_delivery_bucket" {
   value       = module.proof_of_delivery_storage.bucket_name
   sensitive   = true
 }
+
+output "ui_ingress" {
+  description = "Names the Gateway in deploy/gateway uses: the address, the certificate, and the Cloud Armor policy."
+  value = {
+    address         = module.ui_ingress.address_name
+    certificate     = module.ui_ingress.certificate_name
+    security_policy = module.ui_ingress.security_policy_name
+  }
+}
