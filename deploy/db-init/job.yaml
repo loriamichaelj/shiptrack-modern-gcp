@@ -1,0 +1,74 @@
+# Creates the application's database roles and schema, from the release's own image. deploy-app fills in
+# ${IMAGE} (the digest it deploys) and ${GCP_PROJECT_ID} with envsubst and creates the Job with
+# `kubectl create`; the name is generated, so every run is a new Job. The command is idempotent.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: shiptrack-db-init-
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: db-init
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shiptrack
+        app.kubernetes.io/component: db-init
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shiptrack-db-init
+      automountServiceAccountToken: false
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: db-init
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          args: ["db-init"]
+          env:
+            - name: SHIPTRACK_CLOUD
+              value: "gcp"
+            - name: SHIPTRACK_GCP_PROJECT
+              value: "${GCP_PROJECT_ID}"
+            - name: SHIPTRACK_DB_ADMIN_SECRET_NAME
+              value: "shiptrack-db-admin"
+            - name: SHIPTRACK_DB_SECRET_NAME
+              value: "shiptrack-db-app"
+            - name: SHIPTRACK_DB_MIGRATOR_SECRET_NAME
+              value: "shiptrack-db-migrator"
+            # The most connections each role may hold, inside the budget of 21 (scripts/check-connection-budget.py).
+            - name: SHIPTRACK_DB_APP_CONNECTION_LIMIT
+              value: "18"
+            - name: SHIPTRACK_DB_MIGRATOR_CONNECTION_LIMIT
+              value: "3"
+            - name: SHIPTRACK_LOG_LEVEL
+              value: "INFO"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

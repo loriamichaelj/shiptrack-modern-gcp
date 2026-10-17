@@ -1,0 +1,46 @@
+# Helm values for cloud: gcp that name no project, bucket, or service account. Those three are passed with
+# --set from masked secrets at deploy time (scripts/chart-args.sh), and the image digest with
+# --set image.digest. Replica counts are fixed (no KEDA, no HPA), every pod asks for Spot capacity, and
+# the pool sizes keep the database inside its connection budget (scripts/check-connection-budget.py).
+
+cloud: gcp
+spot: true
+
+scaling:
+  mode: fixed
+
+image:
+  repository: ghcr.io/loriamichaelj/shiptrack-modern
+
+logLevel: INFO
+baseUrl: ""
+
+# Names of resources the data root creates. They hold no identifier.
+gcp:
+  dbSecretName: shiptrack-db-app
+  dbMigratorSecretName: shiptrack-db-migrator
+  eventsTopic: shiptrack-carrier-events
+  eventsSubscription: shiptrack-carrier-events-worker
+  notifyTopic: shiptrack-notifications
+  notifySubscription: shiptrack-notifications-worker
+
+api:
+  replicas: 2
+  pool: { size: 4, maxOverflow: 2 }
+
+workerEvents:
+  replicas: 1
+  pool: { size: 2, maxOverflow: 0 }
+
+workerNotify:
+  replicas: 1
+
+slaScan:
+  # No legacy cron to wait for: this environment owns the scan.
+  suspend: false
+  pool: { size: 1, maxOverflow: 1 }
+
+migrations:
+  # This environment owns its schema.
+  enabled: true
+  pool: { size: 1, maxOverflow: 1 }
