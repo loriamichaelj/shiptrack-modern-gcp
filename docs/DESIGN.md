@@ -57,7 +57,7 @@
 | Event bus | EventBridge bus, rule, archive | Service Bus topic with a filter | Pub/Sub topic with a filtered subscription and 7-day retention for replay |
 | Proof-of-delivery storage | S3, presigned GET | Blob, SAS URL | Cloud Storage, V4 signed URL through the IAM signing API (ADR-0011) |
 | Queue-based scaling | KEDA `aws-sqs-queue` | KEDA `azure-servicebus` | Fixed replica counts, no KEDA (ADR-0012) |
-| Ingress | ALB with TargetGroupBinding | Gateway API | A global external Application Load Balancer through Gateway API, HTTPS only, behind a Cloud Armor policy that admits one address (ADR-0031). Without it, `kubectl port-forward` (ADR-0013) |
+| Ingress | ALB with TargetGroupBinding | Gateway API | A regional external Application Load Balancer through Gateway API, plain HTTP on its address, behind a Cloud Armor policy that admits one address (ADR-0031). Without it, `kubectl port-forward` (ADR-0013) |
 | Metrics, logs | AMP, CloudWatch | In-cluster, to be decided | Managed Service for Prometheus, Cloud Logging, Cloud Monitoring (ADR-0014) |
 | Terraform state | S3 | Blob | Cloud Storage bucket with native locking, created by the seed workflow (ADR-0016, ADR-0024) |
 | Workload identity | IAM role per service account | Managed identity per service account | IAM principal per Kubernetes service account, no Google service account except the signer |
@@ -444,7 +444,7 @@ All figures are approximate monthly costs in `us-central1`, **[VERIFY against Go
 | Logging and Monitoring | Logging within the free allotment; Managed Prometheus samples; a few alert conditions | $2 to $5 |
 | State bucket | A few small objects | ≈ $0 |
 | **Baseline total** | | **about $25 to $35** |
-| Global external Application Load Balancer for the UI (ADR-0031) | One HTTPS forwarding rule at $0.025 per hour; the reserved address is free while it is in use | + about $18 |
+| Regional external Application Load Balancer for the UI (ADR-0031) | One HTTP forwarding rule at $0.025 per hour; the reserved address is free while it is in use | + about $18 |
 | Cloud Armor allow-list for the UI | One policy, two rules, and requests | + about $6 |
 | **Total with the UI URL** | | **about $50 to $60** |
 

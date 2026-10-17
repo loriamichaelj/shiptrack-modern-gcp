@@ -55,4 +55,6 @@ module "ui_ingress" {
   source = "../modules/ui-ingress"
 
   project_id = var.project_id
+  region     = var.region
+  network_id = module.network.network_id
 }

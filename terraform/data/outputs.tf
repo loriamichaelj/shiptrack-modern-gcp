@@ -50,10 +50,10 @@ output "proof_of_delivery_bucket" {
 }
 
 output "ui_ingress" {
-  description = "Names the Gateway in deploy/gateway uses: the address, the certificate, and the Cloud Armor policy."
+  description = "Names the Gateway in deploy/gateway uses: the address and the Cloud Armor policy, and the proxy-only range."
   value = {
     address         = module.ui_ingress.address_name
-    certificate     = module.ui_ingress.certificate_name
     security_policy = module.ui_ingress.security_policy_name
+    proxy_only_cidr = module.ui_ingress.proxy_only_cidr
   }
 }

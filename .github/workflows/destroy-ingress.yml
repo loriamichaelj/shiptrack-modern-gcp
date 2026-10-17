@@ -1,8 +1,8 @@
 name: destroy-ingress
 
-# Takes down what the UI load balancer needs from Terraform: the reserved address, the managed certificate,
-# and the Cloud Armor policy (ADR-0031). Run `ops-ui-port` with `remove` first: Google refuses to delete an
-# address, a certificate, or a policy that the Gateway's load balancer still uses. Two jobs, each in the
+# Takes down what the UI load balancer needs from Terraform: the proxy-only subnet, the reserved address, and
+# the Cloud Armor policy (ADR-0031). Run `ops-ui-port` with `remove` first: Google refuses to delete an
+# address, a subnet, or a policy that the Gateway's load balancer still uses. Two jobs, each in the
 # `dev` environment and each needing the owner's approval: the first shows the addresses and actions a
 # destroy would make, the second makes a fresh plan and applies it. Both fail unless `confirm` is exactly
 # `ingress`.
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: "Type ingress to take the UI load balancer's address, certificate, and policy down"
+        description: "Type ingress to take the UI load balancer's subnet, address, and policy down"
         required: true
         type: string
 

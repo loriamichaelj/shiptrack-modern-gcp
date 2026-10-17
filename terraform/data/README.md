@@ -7,7 +7,7 @@ bindings follow the cluster. Design: `docs/DESIGN.md`.
 |---|---|
 | `main.tf` | The `network` module (`../modules/network`): VPC, subnet with secondary ranges for pods and services, router and Cloud NAT, and the range and peering for private services access |
 | `main.tf` (cont.) | The `cloud_sql`, `secrets`, `pubsub`, and `proof_of_delivery_storage` modules, in `../modules` |
-| `main.tf` (cont.) | The `ui_ingress` module: the address, certificate, and Cloud Armor policy the UI's load balancer needs. The Gateway itself is applied by `deploy-app` |
+| `main.tf` (cont.) | The `ui_ingress` module: the proxy-only subnet, address, and Cloud Armor policy the UI's load balancer needs. The Gateway itself is applied by `deploy-app` |
 | `credentials.tf` | The database passwords, as ephemeral values: generated for one run, never stored |
 | `outputs.tf` | Names the other roots look resources up by. Nothing here is secret, and no workflow prints it |
 
