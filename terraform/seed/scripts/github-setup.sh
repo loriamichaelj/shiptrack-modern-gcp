@@ -3,17 +3,17 @@
 # repository, so the two approve and protect alike). Run by a human with admin rights; needs an
 # authenticated `gh`. Safe to re-run.
 #
-#   - environment `dev` (and `bootstrap` with --bootstrap-env): you are the required reviewer,
+#   - environment `dev` (and `seed` with --seed-env): you are the required reviewer,
 #     and only the `dev` branch may deploy to it
 #   - branch protection on `dev`: changes arrive by pull request
 #   - Actions: read-only default token, approval required for every outside contributor
 #   - secret scanning and push protection on
 #
-# Usage: github-setup.sh [--dry-run] [--bootstrap-env] [--check NAME]... <owner>/<repo>
+# Usage: github-setup.sh [--dry-run] [--seed-env] [--check NAME]... <owner>/<repo>
 set -euo pipefail
 
 dry_run=false
-bootstrap_env=false
+seed_env=false
 checks=()
 repo=""
 branch=dev
@@ -21,14 +21,14 @@ branch=dev
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run) dry_run=true ;;
-    --bootstrap-env) bootstrap_env=true ;;
+    --seed-env) seed_env=true ;;
     --check) shift; checks+=("${1:?--check needs a name}") ;;
     -*) echo "unknown option: $1" >&2; exit 2 ;;
     *) repo=$1 ;;
   esac
   shift
 done
-[[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "usage: $0 [--dry-run] [--bootstrap-env] [--check NAME]... <owner>/<repo>" >&2; exit 2; }
+[[ "$repo" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "usage: $0 [--dry-run] [--seed-env] [--check NAME]... <owner>/<repo>" >&2; exit 2; }
 
 failed=0
 api() { # api <method> <path> <json-body>
@@ -60,7 +60,7 @@ setup_environment() {
 }
 
 setup_environment dev
-$bootstrap_env && setup_environment bootstrap
+$seed_env && setup_environment seed
 
 if [[ ${#checks[@]} -gt 0 ]]; then
   status_checks=$(printf '%s\n' "${checks[@]}" | jq -R . | jq -sc '{strict: false, contexts: .}')

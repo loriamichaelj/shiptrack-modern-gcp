@@ -1,10 +1,10 @@
-# bootstrap
+# Seed
 
 Creates what every other pipeline needs before it can run: the Terraform state bucket, the project's
 APIs, the five service accounts, the trust that lets GitHub jobs act as three of them, and their
 permissions.
 
-It is applied **only** by `.github/workflows/apply-bootstrap.yml`, using a seed service account that
+It is applied **only** by `.github/workflows/apply-seed.yml`, using a seed service account that
 you create by hand once. Nothing is applied from a workstation. See `docs/DESIGN.md` §8 for the
 design and `docs/ADR.md` (ADR-0002, ADR-0024) for the decisions.
 
@@ -66,12 +66,12 @@ or any other repository, cannot authenticate. Only tokens that pass it reach the
 
 ### 3. Seed service account (GCP, by hand)
 
-The seed account runs this bootstrap and nothing else. It can be used only by a job in the protected
-`bootstrap` environment of this repository.
+The seed account runs the `apply-seed` workflow and nothing else. It can be used only by a job in the protected
+`seed` environment of this repository.
 
 ```sh
 gcloud iam service-accounts create shiptrack-seed \
-  --project "$PROJECT_ID" --display-name "ShipTrack bootstrap seed"
+  --project "$PROJECT_ID" --display-name "ShipTrack seed"
 SEED=shiptrack-seed@$PROJECT_ID.iam.gserviceaccount.com
 
 for role in roles/serviceusage.serviceUsageAdmin roles/iam.serviceAccountAdmin \
@@ -82,23 +82,23 @@ done
 
 gcloud iam service-accounts add-iam-policy-binding "$SEED" --project "$PROJECT_ID" \
   --role roles/iam.workloadIdentityUser --quiet >/dev/null \
-  --member "principal://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/subject/repo:$ORG@$OWNER_ID/shiptrack-modern-gcp@$REPO_ID:environment:bootstrap"
+  --member "principal://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/subject/repo:$ORG@$OWNER_ID/shiptrack-modern-gcp@$REPO_ID:environment:seed"
 ```
 
-The seed account holds powerful roles because bootstrap creates service accounts and grants roles.
+The seed account holds powerful roles because the seed root creates service accounts and grants roles.
 Terraform does not manage it, so the pipeline cannot modify its own foundation. Narrow or delete it
-once the five accounts exist and you no longer need to change bootstrap.
+once the five accounts exist and you no longer need to change the seed root.
 
 ### 4. Repository settings (GitHub)
 
 Use `--dry-run` first to see the calls.
 
 ```sh
-terraform/bootstrap/scripts/github-setup.sh --dry-run --bootstrap-env $ORG/shiptrack-modern-gcp
-terraform/bootstrap/scripts/github-setup.sh --bootstrap-env $ORG/shiptrack-modern-gcp
+terraform/seed/scripts/github-setup.sh --dry-run --seed-env $ORG/shiptrack-modern-gcp
+terraform/seed/scripts/github-setup.sh --seed-env $ORG/shiptrack-modern-gcp
 ```
 
-It creates the `dev` and `bootstrap` environments with you as the required reviewer and `dev` as the
+It creates the `dev` and `seed` environments with you as the required reviewer and `dev` as the
 only branch allowed to deploy, protects the `dev` branch so changes arrive by pull request, makes
 the default workflow token read-only, requires approval for every outside contributor's workflow,
 and turns on secret scanning and push protection.
@@ -109,25 +109,25 @@ a workflow on another branch from requesting an apply account.
 ### 5. Secrets and variables (GitHub)
 
 The values identify the project, so they are secrets (GitHub masks secrets in logs). The seed values
-belong to the `bootstrap` environment, so only jobs there can read them.
+belong to the `seed` environment, so only jobs there can read them.
 
 ```sh
-gh secret set GCP_PROJECT_ID  --env bootstrap -R $ORG/shiptrack-modern-gcp --body "$PROJECT_ID"
-gh secret set GCP_PROJECT_NUMBER --env bootstrap -R $ORG/shiptrack-modern-gcp --body "$PROJECT_NUMBER"
-gh secret set GCP_WORKLOAD_IDENTITY_PROVIDER --env bootstrap -R $ORG/shiptrack-modern-gcp \
+gh secret set GCP_PROJECT_ID  --env seed -R $ORG/shiptrack-modern-gcp --body "$PROJECT_ID"
+gh secret set GCP_PROJECT_NUMBER --env seed -R $ORG/shiptrack-modern-gcp --body "$PROJECT_NUMBER"
+gh secret set GCP_WORKLOAD_IDENTITY_PROVIDER --env seed -R $ORG/shiptrack-modern-gcp \
   --body "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github-actions"
-gh secret set GCP_SEED_SERVICE_ACCOUNT --env bootstrap -R $ORG/shiptrack-modern-gcp --body "$SEED"
+gh secret set GCP_SEED_SERVICE_ACCOUNT --env seed -R $ORG/shiptrack-modern-gcp --body "$SEED"
 gh variable set GCP_REGION -R $ORG/shiptrack-modern-gcp --body us-central1
 ```
 
 ### 6. Merge this to `dev`
 
-The `bootstrap` environment only accepts deployments from `dev`, so the workflow can run only after
+The `seed` environment only accepts deployments from `dev`, so the workflow can run only after
 this code is on `dev`.
 
 ## Running it
 
-1. Actions, then **apply-bootstrap**, then **Run workflow** on `dev`.
+1. Actions, then **apply-seed**, then **Run workflow** on `dev`.
 2. Approve the **plan** job. Its summary lists each resource and action, never values.
 3. If the plan is what you expect, approve the **apply** job.
 
@@ -163,7 +163,7 @@ exact subject from this table, where the prefix is `repo:<ORG>@<OWNER_ID>/shiptr
 
 | Service account | Subject suffix |
 |---|---|
-| `shiptrack-seed` (by hand) | `:environment:bootstrap` |
+| `shiptrack-seed` (by hand) | `:environment:seed` |
 | `shiptrack-plan` | `:pull_request`, `:ref:refs/heads/dev` |
 | `shiptrack-apply` | `:environment:dev` |
 | `shiptrack-deploy` | `:environment:dev` |
@@ -178,7 +178,7 @@ lock objects.
 
 | Object | Owner |
 |---|---|
-| `gcp/bootstrap/default.tfstate` | bootstrap |
+| `gcp/seed/default.tfstate` | seed |
 | `gcp/data/default.tfstate` | data |
 | `gcp/cluster/default.tfstate` | cluster |
 | `gcp/addons/default.tfstate` | addons |
@@ -190,5 +190,5 @@ lock objects.
 - **The run failed while creating the bucket**: nothing is stored yet. If the bucket exists, import
   it from a workstation with credentials, or delete the empty bucket and re-run:
   `terraform import google_storage_bucket.state <bucket-name>` (then re-run the workflow).
-- **A stuck lock on the bootstrap state** (`gcp/bootstrap/default.tflock` left behind by a cancelled
+- **A stuck lock on the seed state** (`gcp/seed/default.tflock` left behind by a cancelled
   run): delete that one object from the bucket after confirming no run is in progress.
