@@ -1,0 +1,9 @@
+# Checkov configuration. The directories to scan are passed on the command line (CI), because a
+# `directory:` entry here replaces them. Skips are written inline next to the resource, with a reason:
+#   #checkov:skip=CKV_GCP_XXX: <reason>
+framework:
+  - terraform
+skip-path:
+  - '\.terraform'
+quiet: true
+compact: true

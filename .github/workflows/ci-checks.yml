@@ -1,0 +1,121 @@
+name: ci-checks
+
+# Static checks on every pull request. None needs GCP access. Every job runs in the `ci` environment, so
+# the owner approves the run before any job starts (ADR-0025). The `chart` job joins when
+# deploy/values-gcp.yaml exists.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.16.4"
+  TFLINT_VERSION: "v0.64.0"
+  TRIVY_VERSION: "v0.74.0"
+  CHECKOV_VERSION: "3.3.21"
+  PYYAML_VERSION: "6.0.2"
+  GITLEAKS_VERSION: "8.30.1"
+  # sha256 of gitleaks_<version>_linux_x64.tar.gz, from the release's checksums file
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  ACTIONLINT_VERSION: "1.7.12"
+  # sha256 of actionlint_<version>_linux_amd64.tar.gz, from the release's checksums file
+  ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+
+jobs:
+  terraform:
+    runs-on: ubuntu-24.04
+    environment: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - name: Format
+        run: terraform fmt -check -recursive -diff terraform
+      # Every directory under terraform/ except modules/ is a root (modules are validated through the
+      # roots that call them). A new root is covered without editing this file.
+      - name: Validate each root
+        run: |
+          for root in $(find terraform -mindepth 1 -maxdepth 1 -type d ! -name modules | sort); do
+            echo "::group::$root"
+            terraform -chdir="$root" init -backend=false -input=false
+            terraform -chdir="$root" validate
+            echo "::endgroup::"
+          done
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+      # Skips live inline, next to the resource: #checkov:skip=CKV_...: <reason>
+      - name: Checkov
+        run: pipx run --spec "checkov==${CHECKOV_VERSION}" checkov --config-file .checkov.yaml -d terraform
+      - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+      - name: Trivy config
+        run: trivy config --severity HIGH,CRITICAL --skip-dirs "**/.terraform" --exit-code 1 .
+
+  secrets:
+    runs-on: ubuntu-24.04
+    environment: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks
+        run: |
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gitleaks.tar.gz" "$url"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/gitleaks-bin"
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP/gitleaks-bin" gitleaks
+          echo "$RUNNER_TEMP/gitleaks-bin" >>"$GITHUB_PATH"
+      - name: Scan the files
+        run: gitleaks dir . --config .gitleaks.toml --redact --no-banner
+      # The commits on the branch are scanned too: a fix in a later commit does not clear a leak.
+      - name: Scan the commits on the branch
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: gitleaks git . --config .gitleaks.toml --redact --no-banner --log-opts="${BASE}..${HEAD}"
+
+  workflows:
+    runs-on: ubuntu-24.04
+    environment: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: |
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tar.gz" "$url"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/actionlint-bin"
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP/actionlint-bin" actionlint
+          echo "$RUNNER_TEMP/actionlint-bin" >>"$GITHUB_PATH"
+      - name: actionlint
+        run: actionlint -color
+      - name: ShellCheck the scripts
+        run: shellcheck terraform/seed/scripts/*.sh
+      # Every job names an environment and every action is pinned to a commit SHA.
+      - name: Workflow policy
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "pyyaml==${PYYAML_VERSION}"
+          "$RUNNER_TEMP/venv/bin/python" .github/scripts/check-workflows.py
