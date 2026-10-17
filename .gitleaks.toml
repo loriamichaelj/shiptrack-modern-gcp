@@ -1,0 +1,40 @@
+# Secret and identifier scan (design §10). Extends gitleaks' default rules with the identifiers that
+# must never appear in this public repository: project numbers, project IDs, service account emails,
+# and Workload Identity resource names. Placeholders such as <PROJECT_ID> and $PROJECT_NUMBER never match.
+title = "shiptrack gcp scrub"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "twelve-digit-number"
+description = "A standalone 12-digit number: the shape of a project number or an AWS account ID. Use a variable or <PROJECT_NUMBER>."
+regex = '''\b[0-9]{12}\b'''
+tags = ["identifier"]
+
+  [[rules.allowlists]]
+  description = "Obvious placeholders"
+  regexTarget = "match"
+  regexes = ['''^0{12}$''', '''^1{12}$''', '''^123456789012$''']
+
+[[rules]]
+id = "gcp-generated-project-id"
+description = "A generated project ID (word-word-digits-suffix). Use <PROJECT_ID> or a variable."
+regex = '''\b[a-z]{3,}-[a-z]{3,}-[0-9]{6}-[a-z0-9]{2}\b'''
+tags = ["identifier"]
+
+[[rules]]
+id = "service-account-email"
+description = "A service account email with a real project. Use <SERVICE_ACCOUNT> or a variable."
+regex = '''[a-z][a-z0-9-]{4,}@[a-z][a-z0-9-]{4,}\.iam\.gserviceaccount\.com'''
+tags = ["identifier"]
+
+[[rules]]
+id = "workload-identity-resource-name"
+description = "A Workload Identity resource name that carries a project number. Build it from variables."
+regex = '''projects/[0-9]{6,}/locations/global/workloadIdentityPools'''
+tags = ["identifier"]
+
+[allowlist]
+description = "Generated lock files carry hashes, not identifiers"
+paths = ['''\.terraform\.lock\.hcl$''']

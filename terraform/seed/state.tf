@@ -2,6 +2,7 @@
 # with local state and moves the state into it before anything else is created.
 
 resource "google_storage_bucket" "state" {
+  #checkov:skip=CKV_GCP_62: Usage logging needs a second bucket to protect; this one holds a few state files for three accounts, and Admin Activity audit logs record changes to it (design §12)
   name          = local.state_bucket_name
   project       = var.project_id
   location      = var.region
