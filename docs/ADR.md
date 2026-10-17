@@ -15,9 +15,9 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0009 | `pubsub-for-queues-and-notifications` | Planned |
 | 0010 | `secret-manager-and-workload-identity` | Planned |
 | 0011 | `cloud-storage-and-signed-urls` | Planned |
-| 0012 | `fixed-replicas-without-keda` | Planned |
+| 0012 | `fixed-replicas-without-keda` | Accepted |
 | 0013 | `no-public-ingress-by-default` | Accepted |
-| 0014 | `observability-stack` | Planned |
+| 0014 | `observability-stack` | Accepted |
 | 0015 | `deploy-by-workflow` | Accepted |
 | 0016 | `state-in-cloud-storage` | Accepted |
 | 0017 | `secrets-out-of-state` | Accepted |
@@ -157,7 +157,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0012: fixed-replicas-without-keda
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** AWS scales workers with KEDA on queue depth, including scale-to-zero for worker-notify. KEDA runs three pods that request about 0.3 vCPU and 0.3 GiB, about $3 a month on Spot pods. Keeping worker-notify at one replica costs about $0.60. KEDA's Pub/Sub scaler reads Cloud Monitoring, which adds a delay of a minute or more.
 
@@ -179,7 +179,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0014: observability-stack
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** AWS uses AMP, a managed scraper, Grafana, and CloudWatch alarms. Managed Service for Prometheus is built into Autopilot and billed per sample. Grafana needs a pod and a data source. Cloud Monitoring dashboards and alert policies need no pods.
 
