@@ -1,10 +1,12 @@
 name: ops-check-cluster
 
 # Proves the cluster can be reached through its DNS endpoint by the deploy account, which is the Done
-# criterion of the cluster root (design section 16). It fetches credentials on the runner, asks the
-# control plane for its version and readiness, and changes nothing. The deploy account has no
-# Kubernetes permissions until the add-ons root grants them, so those two paths, which any
-# authenticated user may read, are all it asks for. Nothing is printed that names the cluster's address.
+# criterion of the cluster root (design section 16), and that the deploy account may list pods in the
+# namespace and nowhere else, which is the Done criterion of the add-ons root. It fetches credentials on
+# the runner, asks the control plane for its version and readiness, and asks what the account may do.
+# It changes nothing. Before the add-ons root is applied the namespace and its role do not exist, so the
+# permission answers are reported and do not fail the run. Nothing is printed that names the cluster's
+# address.
 
 on:
   workflow_dispatch:
@@ -25,6 +27,11 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from this plugin, which the runner image does not include.
+      - name: Install the GKE auth plugin
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends google-cloud-cli-gke-gcloud-auth-plugin
       - name: Reach the control plane through the DNS endpoint
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -37,3 +44,10 @@ jobs:
           kubectl get --raw /readyz
           echo
           echo "The cluster answers through its DNS endpoint."
+          # kubectl auth can-i exits 1 for "no", which is an answer here and not a failure.
+          allowed() { kubectl auth can-i "$@" 2>/dev/null || true; }
+          echo "list pods in shiptrack:       $(allowed list pods --namespace shiptrack)"
+          echo "create deployments in shiptrack: $(allowed create deployments.apps --namespace shiptrack)"
+          echo "list pods in kube-system:     $(allowed list pods --namespace kube-system)"
+          echo "list pods in all namespaces:  $(allowed list pods --all-namespaces)"
+          echo "list nodes:                   $(allowed list nodes)"
