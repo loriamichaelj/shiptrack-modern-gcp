@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Plan or apply one Terraform root (data, cluster, or addons) against the state bucket the seed
+# Plan or apply one Terraform root (data, cluster, addons, or finops) against the state bucket the seed
 # root created. Run by ci-terraform.yml (plan, as shiptrack-plan) and apply-terraform.yml (apply, as
 # shiptrack-apply).
 # Usage: .github/scripts/terraform-ci.sh <root> plan|apply
@@ -17,16 +17,26 @@
 #   GCP_PROJECT_ID       project that holds the resources (required)
 #   GCP_PROJECT_NUMBER   its number; part of the state bucket's name (required)
 #   GCP_REGION           region (default us-central1)
+#   GCP_BILLING_ACCOUNT_ID  billing account of the project (required for finops)
+#   GCP_ALERT_EMAIL         address for budget alerts (required for finops)
 #   SUMMARY_FILE         optional; the summary is also appended here, for the pull request comment
 set -euo pipefail
 
 root=${1:?usage: terraform-ci.sh <root> plan|apply}
 mode=${2:?usage: terraform-ci.sh <root> plan|apply}
-[[ "$root" =~ ^(data|cluster|addons)$ ]] || { echo "unknown root: $root" >&2; exit 2; }
+[[ "$root" =~ ^(data|cluster|addons|finops)$ ]] || { echo "unknown root: $root" >&2; exit 2; }
 [[ "$mode" == plan || "$mode" == apply ]] || { echo "unknown mode: $mode" >&2; exit 2; }
 : "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}"
 : "${GCP_PROJECT_NUMBER:?GCP_PROJECT_NUMBER is required}"
 
+if [[ "$root" == finops ]]; then
+  : "${GCP_BILLING_ACCOUNT_ID:?GCP_BILLING_ACCOUNT_ID is required for finops}"
+  : "${GCP_ALERT_EMAIL:?GCP_ALERT_EMAIL is required for finops}"
+  export TF_VAR_billing_account_id=$GCP_BILLING_ACCOUNT_ID
+  export TF_VAR_alert_email=$GCP_ALERT_EMAIL
+  echo "::add-mask::$GCP_BILLING_ACCOUNT_ID"
+  echo "::add-mask::$GCP_ALERT_EMAIL"
+fi
 export TF_VAR_project_id=$GCP_PROJECT_ID
 export TF_VAR_project_number=$GCP_PROJECT_NUMBER
 export TF_VAR_region=${GCP_REGION:-us-central1}
@@ -43,7 +53,10 @@ echo "::add-mask::$bucket"
 log() { printf '%s\n' "$*"; }
 
 # Hide the project and its number from anything printed on a failure.
-redact() { sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER}/***/g"; }
+redact() {
+  sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER}/***/g" \
+    -e "s/${GCP_BILLING_ACCOUNT_ID:-@@none@@}/***/g" -e "s/${GCP_ALERT_EMAIL:-@@none@@}/***/g"
+}
 
 # Run a terraform command quietly; show its output (redacted) only if it fails.
 quietly() {

@@ -47,11 +47,12 @@ terraform/
     scripts/            ci.sh (plan and apply), github-setup.sh (environments, branch protection)
   data/                 the network, Cloud SQL, and the database secrets (Pub/Sub and storage follow)
   modules/              network, cloud-sql, secrets (more follow with the resources they hold)
+  finops/               the monthly budget with alerts, and the dataset for the billing export
 .github/workflows/
   apply-seed.yml        applies terraform/seed
   ci-checks.yml         pull request checks: terraform, secrets, workflows
   ci-terraform.yml      pull request plan of the data, cluster, and addons roots, as a comment
-  apply-terraform.yml   applies one of those roots
+  apply-terraform.yml   applies one of those roots (and finops)
   destroy-network.yml   takes the network down
   destroy-cloud-sql.yml takes the database down
   destroy-secrets.yml   takes the database secrets down
@@ -76,7 +77,7 @@ in the design and are added phase by phase.
 | G3 Image (in `shiptrack-modern`) | Not started |
 | G5 Data root | In progress: the network, Cloud SQL, and the database secrets are built and not yet applied. Pub/Sub, the bucket, and the workload bindings follow |
 | G6 to G7 Cluster and addons roots | Not started |
-| FinOps (ADR-0028) | In progress: the APIs and roles are in the seed root (this needs an `apply-seed` run). The budget, the cost export dataset, and `check-cost` follow |
+| FinOps (ADR-0028) | In progress: the seed root has the APIs and roles (applied). The budget, the email channel, and the export dataset are built and not yet applied. `check-cost` follows |
 | G9 to G11 Application, validation, operations | Not started |
 
 Decisions still waiting on the user are the entries marked Planned in [`docs/ADR.md`](docs/ADR.md),
