@@ -1,0 +1,201 @@
+name: deploy-app
+
+# Puts a release on the cluster: runs the db-init Job, installs the Helm chart with the image digest you
+# give, waits for the rollout, runs the platform's contract smoke suite through a port-forward, and rolls
+# back if the smoke test fails. It never runs Terraform and never builds anything. The `dev` environment
+# requires a reviewer, so every deploy is approved. The chart is the shiptrack-modern commit in
+# deploy/chart-ref, and the image is the digest published to GHCR by shiptrack-modern's release-image.
+#
+# A pre-upgrade migration hook is not undone by `--atomic` or `helm rollback`, so schema changes must stay
+# backward compatible.
+
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Image digest to deploy, sha256:<64 hex>, from shiptrack-modern's release-image"
+        required: true
+        type: string
+      platform_ref:
+        description: "Branch, tag, or commit of shiptrack-platform to take the contract suite from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.13.1"
+  PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+  RELEASE: shiptrack
+  NAMESPACE: shiptrack
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # An image that cannot be pulled would otherwise show up as a ten-minute timeout.
+      - name: Check that the image can be pulled
+        id: image
+        env:
+          DIGEST: ${{ inputs.digest }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::the digest must be sha256:<64 hex>"; exit 1; }
+          owner=${GITHUB_REPOSITORY_OWNER,,}
+          docker buildx imagetools inspect "ghcr.io/${owner}/shiptrack-modern@${DIGEST}" >/dev/null \
+            || { echo "::error::ghcr.io/${owner}/shiptrack-modern@${DIGEST} cannot be pulled without credentials"; exit 1; }
+          echo "digest=$DIGEST" >>"$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${owner}/shiptrack-modern@${DIGEST}" >>"$GITHUB_OUTPUT"
+
+      - name: Read the pinned chart commit
+        id: chart
+        run: echo "sha=$(tr -d '[:space:]' < deploy/chart-ref)" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/shiptrack-modern
+          ref: ${{ steps.chart.outputs.sha }}
+          path: modern
+          persist-credentials: false
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+
+      - name: Run the db-init Job
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          kubectl apply -f deploy/db-init/serviceaccount.yaml
+          # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
+          job=$(envsubst '${IMAGE} ${GCP_PROJECT_ID}' <deploy/db-init/job.yaml | kubectl create -f - -o name)
+          echo "created ${job}"
+          for _ in $(seq 1 60); do
+            succeeded=$(kubectl -n "$NAMESPACE" get "$job" -o jsonpath='{.status.succeeded}')
+            failed=$(kubectl -n "$NAMESPACE" get "$job" -o jsonpath='{.status.failed}')
+            [[ "$succeeded" == 1 || "${failed:-0}" -ge 1 ]] && break
+            sleep 5
+          done
+          # The Job's own log names the roles it set, never a password. The address is hidden anyway.
+          kubectl -n "$NAMESPACE" logs "$job" --all-containers --tail=40 2>&1 | sed -E 's/(host=)[^ ]+/\1<HOST>/g'
+          [[ "$(kubectl -n "$NAMESPACE" get "$job" -o jsonpath='{.status.succeeded}')" == 1 ]] \
+            || { echo "::error::the db-init Job did not complete"; exit 1; }
+
+      - name: Note the current Helm revision
+        id: before
+        run: |
+          revision=$(helm history "$RELEASE" -n "$NAMESPACE" --max 1 -o json 2>/dev/null | jq -r '.[0].revision // empty' || true)
+          echo "revision=${revision}" >>"$GITHUB_OUTPUT"
+          echo "revision before this deploy: ${revision:-none (first install)}"
+
+      # The sampler prints pods, events, and the log of any pod that is not Ready while Helm waits, because
+      # --atomic removes them when it fails.
+      - name: Install the release
+        id: upgrade
+        env:
+          IMAGE_DIGEST: ${{ steps.image.outputs.digest }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROOF_OF_DELIVERY_BUCKET: ${{ secrets.GCP_PROOF_OF_DELIVERY_BUCKET }}
+        run: |
+          echo "::add-mask::$GCP_PROOF_OF_DELIVERY_BUCKET"
+          export GCP_PROOF_OF_DELIVERY_SIGNER="shiptrack-proof-of-delivery@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
+          echo "::add-mask::$GCP_PROOF_OF_DELIVERY_SIGNER"
+          mapfile -t args < <(scripts/chart-args.sh)
+          scripts/sample-rollout.sh "$NAMESPACE" 30 &
+          sampler=$!
+          started=$(date +%s)
+          status=0
+          helm upgrade --install "$RELEASE" modern/charts/shiptrack -n "$NAMESPACE" \
+            -f deploy/values-gcp.yaml "${args[@]}" \
+            --atomic --wait --timeout 10m --history-max 10 >/dev/null || status=$?
+          kill "$sampler" 2>/dev/null || true
+          [[ "$status" == 0 ]] || exit "$status"
+          echo "seconds=$(($(date +%s) - started))" >>"$GITHUB_OUTPUT"
+          echo "revision=$(helm history "$RELEASE" -n "$NAMESPACE" --max 1 -o json | jq -r '.[0].revision')" >>"$GITHUB_OUTPUT"
+
+      - name: Wait for every Deployment to roll out
+        run: |
+          for deployment in $(kubectl -n "$NAMESPACE" get deployments -o name); do
+            kubectl -n "$NAMESPACE" rollout status "$deployment" --timeout=300s
+          done
+
+      - name: Pin the platform contract suite
+        id: pin
+        env:
+          REF: ${{ inputs.platform_ref || 'dev' }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "using the contract suite from $PLATFORM_REPO at ${sha:0:12}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: platform
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Smoke test through a port-forward
+        id: smoke
+        run: scripts/contract.sh smoke platform/validation/contract
+
+      - name: Roll back
+        if: failure() && steps.smoke.outcome == 'failure' && steps.before.outputs.revision != ''
+        env:
+          PREVIOUS: ${{ steps.before.outputs.revision }}
+        run: |
+          echo "::error::the smoke test failed; rolling back to revision ${PREVIOUS}"
+          helm rollback "$RELEASE" "$PREVIOUS" -n "$NAMESPACE" --wait --timeout 10m
+
+      - name: Record the deploy
+        if: success()
+        env:
+          DIGEST: ${{ steps.image.outputs.digest }}
+          CHART: ${{ steps.chart.outputs.sha }}
+          REVISION: ${{ steps.upgrade.outputs.revision }}
+          SECONDS_TAKEN: ${{ steps.upgrade.outputs.seconds }}
+        run: |
+          {
+            echo "### Deployed"
+            echo
+            echo "- image digest: \`${DIGEST}\`"
+            echo "- chart: shiptrack-modern at \`${CHART:0:12}\`"
+            echo "- Helm revision: ${REVISION}"
+            echo "- install took: ${SECONDS_TAKEN} s"
+          } >>"$GITHUB_STEP_SUMMARY"
