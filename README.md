@@ -56,7 +56,8 @@ terraform/
   destroy-network.yml   takes the network down
   destroy-cloud-sql.yml takes the database down
   destroy-secrets.yml   takes the database secrets down
-.github/scripts/        terraform-ci.sh (plan and apply a root), terraform-destroy.sh (destroy one group)
+  check-cost.yml        the month's cost from the billing export, read-only
+.github/scripts/        terraform-ci.sh (plan and apply a root), terraform-destroy.sh (destroy one group), cost-report.sh (the cost report)
 .checkov.yaml           checkov configuration
 .gitleaks.toml          secret scanning configuration
 .tflint.hcl             tflint configuration
@@ -77,7 +78,7 @@ in the design and are added phase by phase.
 | G3 Image (in `shiptrack-modern`) | Not started |
 | G5 Data root | In progress: the network, Cloud SQL, and the database secrets are built and not yet applied. Pub/Sub, the bucket, and the workload bindings follow |
 | G6 to G7 Cluster and addons roots | Not started |
-| FinOps (ADR-0028) | In progress: the seed root has the APIs and roles (applied). The budget, the email channel, and the export dataset are built and not yet applied. `check-cost` follows |
+| FinOps (ADR-0028) | Done: the $50 budget with alerts, the email channel, and the export dataset are applied, and the usage cost export is on. `check-cost` reads it |
 | G9 to G11 Application, validation, operations | Not started |
 
 Decisions still waiting on the user are the entries marked Planned in [`docs/ADR.md`](docs/ADR.md),

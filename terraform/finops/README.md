@@ -21,5 +21,7 @@ state bucket as a channel label, which only the three pipeline accounts can read
 3. After the merge, Actions, **apply-terraform**, root `finops`, on `dev`.
 4. Switch on the standard usage cost export in the billing console, pointing at the dataset
    `shiptrack_billing_export`. Terraform cannot do this step **[VERIFY]**.
+5. **check-cost** (Actions, on `dev`, approve the `ci` environment) prints the month's cost by service, by
+   the `name` label, and by day, against the budget. The export fills within a day of being switched on.
 
 The budget is free. BigQuery storage for one project's cost rows is far under the free tier **[VERIFY]**.
