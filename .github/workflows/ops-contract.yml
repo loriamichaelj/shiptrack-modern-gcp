@@ -1,0 +1,83 @@
+name: ops-contract
+
+# Runs the platform's full contract suite against the API in the cluster, through `kubectl port-forward`:
+# the cluster has no public address, so a runner reaches it only this way. The suite runs against one stack,
+# with an empty test token, and the AWS routing headers have nothing to steer. It creates shipments, events,
+# and proof-of-delivery documents in this environment's database, so the `dev` environment requires the
+# owner's approval. It needs a release to be deployed first (deploy-app).
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform_ref:
+        description: "Branch, tag, or commit of shiptrack-platform to take the contract suite from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.13.1"
+  PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+
+jobs:
+  contract:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+
+      - name: Pin the platform contract suite
+        id: pin
+        env:
+          REF: ${{ inputs.platform_ref || 'dev' }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "using the contract suite from $PLATFORM_REPO at ${sha:0:12}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: platform
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Run the full contract suite through a port-forward
+        run: scripts/contract.sh full platform/validation/contract
