@@ -104,8 +104,9 @@ jobs:
             [[ "$succeeded" == 1 || "${failed:-0}" -ge 1 ]] && break
             sleep 5
           done
-          # The Job's own log names the roles it set, never a password. The address is hidden anyway.
-          kubectl -n "$NAMESPACE" logs "$job" --all-containers --tail=40 2>&1 | sed -E 's/(host=)[^ ]+/\1<HOST>/g'
+          # The Job's own log names the roles it set, never a password. The database address is hidden.
+          kubectl -n "$NAMESPACE" logs "$job" --all-containers --tail=40 2>&1 \
+            | sed -E -e 's/("host": ")[^"]*/\1<HOST>/g' -e 's/(host=)[^ ]+/\1<HOST>/g'
           [[ "$(kubectl -n "$NAMESPACE" get "$job" -o jsonpath='{.status.succeeded}')" == 1 ]] \
             || { echo "::error::the db-init Job did not complete"; exit 1; }
 
