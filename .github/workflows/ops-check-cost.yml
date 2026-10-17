@@ -1,4 +1,4 @@
-name: check-cost
+name: ops-check-cost
 
 # Reads the billing export and prints the month's cost by service, by the `name` label, and by day,
 # against the monthly budget (ADR-0028). It changes nothing. It runs as the read-only plan account in

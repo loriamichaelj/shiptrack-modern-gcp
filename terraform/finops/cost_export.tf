@@ -1,6 +1,6 @@
 # The dataset the standard usage cost export writes to (ADR-0028). Terraform creates the dataset;
 # switching the export on is a billing console step (terraform/seed/README.md). The plan account may
-# read the dataset, for check-cost, and nothing else in it.
+# read the dataset, for ops-check-cost, and nothing else in it.
 
 resource "google_bigquery_dataset" "billing_export" {
   #checkov:skip=CKV_GCP_81: Google-managed encryption is enough for cost rows, and a customer-managed key costs a key plus operations.
