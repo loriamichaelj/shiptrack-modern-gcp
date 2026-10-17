@@ -328,7 +328,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | `ci-checks` | pull request | Static checks (§10), in environment `ci` |
 | `ci-terraform` | pull request | In environment `ci`, `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
 | `apply-seed` | dispatch | Applies `terraform/seed` as the seed account: two jobs in the `seed` environment, plan then apply, each approved (§8.1) |
-| `apply-terraform` | dispatch | `apply` in the order `data`, `cluster`, `addons` as `shiptrack-apply`, in the `dev` environment with approval |
+| `apply-terraform` | dispatch with a root | `apply` of the chosen root (`data`, then `cluster`, then `addons`) as `shiptrack-apply`, in the `dev` environment with approval |
 | `destroy-*` | dispatch with a confirmation | Takes down one cost-bearing resource group (§9.4) |
 | `deploy-app` | dispatch with a digest | Deploy (below) |
 | `ops-contract` | dispatch | Contract suite through a port-forward (§9.3) |

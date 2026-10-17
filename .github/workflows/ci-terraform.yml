@@ -1,0 +1,75 @@
+name: ci-terraform
+
+# Plans the data, cluster, and addons roots on a pull request as the read-only plan account and
+# comments the addresses and actions on the pull request. It never locks or writes state, never
+# uploads a plan, and never prints an attribute value: the repository is public.
+# The job runs in the `ci` environment, so the owner approves the run first (ADR-0025).
+
+on:
+  pull_request:
+    paths:
+      - "terraform/data/**"
+      - "terraform/cluster/**"
+      - "terraform/addons/**"
+      - "terraform/modules/**"
+      - ".github/scripts/terraform-ci.sh"
+      - ".github/workflows/ci-terraform.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-terraform-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_VERSION: "1.16.4"
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    environment: ci
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_PLAN_SERVICE_ACCOUNT }}
+      # A root whose plan needs another root's resources (cluster and addons before data is applied)
+      # fails here until that root is applied; the comment says so.
+      - name: Plan each root
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          SUMMARY_FILE: ${{ runner.temp }}/comment.md
+        run: |
+          printf '## Terraform plan\n\nAddresses and actions only; no values. Run by the read-only plan account.\n\n' >"$SUMMARY_FILE"
+          failed=0
+          for root in data cluster addons; do
+            [[ -f "terraform/${root}/versions.tf" ]] || continue
+            if ! .github/scripts/terraform-ci.sh "$root" plan; then
+              printf '### %s\n\nThe plan failed. See the run log.\n\n' "$root" >>"$SUMMARY_FILE"
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - name: Comment on the pull request
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          COMMENT: ${{ runner.temp }}/comment.md
+        run: |
+          [[ -s "$COMMENT" ]] || { echo "No plan was written; nothing to comment."; exit 0; }
+          gh pr comment "$PR" --body-file "$COMMENT" --edit-last --create-if-none

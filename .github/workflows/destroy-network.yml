@@ -1,0 +1,94 @@
+name: destroy-network
+
+# Takes down the network: the VPC, subnet, router, Cloud NAT, and private services access (ADR-0027).
+# Two jobs, each in the `dev` environment and each needing the owner's approval: the first shows the
+# addresses and actions a destroy would make, the second makes a fresh plan and applies it. Both fail
+# unless `confirm` is exactly `network`. Remove Cloud SQL and the cluster first: Google refuses to
+# remove a network that is still in use.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type network to take the network down"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.4"
+  # The resources of this group, in the data root.
+  TARGETS: >-
+    google_service_networking_connection.private_services
+    google_compute_global_address.private_services
+    google_compute_router_nat.this
+    google_compute_router.this
+    google_compute_subnetwork.this
+    google_compute_network.this
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+      - name: Plan the destroy
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          # shellcheck disable=SC2086 # TARGETS is a list of addresses separated by spaces
+          .github/scripts/terraform-destroy.sh data plan network $TARGETS
+
+  destroy:
+    needs: plan
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+      # A fresh plan is made in this job and applied from the same job; no plan file is uploaded.
+      - name: Destroy
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          # shellcheck disable=SC2086 # TARGETS is a list of addresses separated by spaces
+          .github/scripts/terraform-destroy.sh data destroy network $TARGETS

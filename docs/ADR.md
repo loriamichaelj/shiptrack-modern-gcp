@@ -9,23 +9,23 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0003 | `tags-and-labels` | Accepted |
 | 0004 | `cost-is-a-design-constraint` | Accepted |
 | 0005 | `gke-autopilot-with-spot-pods` | Accepted |
-| 0006 | `region-us-central1` | Planned |
-| 0007 | `private-nodes-and-cloud-nat` | Planned |
-| 0008 | `cloud-sql-shared-core-private-ip` | Planned |
-| 0009 | `pubsub-for-queues-and-notifications` | Planned |
-| 0010 | `secret-manager-and-workload-identity` | Planned |
-| 0011 | `cloud-storage-and-signed-urls` | Planned |
+| 0006 | `region-us-central1` | Accepted |
+| 0007 | `private-nodes-and-cloud-nat` | Accepted |
+| 0008 | `cloud-sql-shared-core-private-ip` | Accepted |
+| 0009 | `pubsub-for-queues-and-notifications` | Accepted |
+| 0010 | `secret-manager-and-workload-identity` | Accepted |
+| 0011 | `cloud-storage-and-signed-urls` | Accepted |
 | 0012 | `fixed-replicas-without-keda` | Accepted |
 | 0013 | `no-public-ingress-by-default` | Accepted |
 | 0014 | `observability-stack` | Accepted |
 | 0015 | `deploy-by-workflow` | Accepted |
 | 0016 | `state-in-cloud-storage` | Accepted |
 | 0017 | `secrets-out-of-state` | Accepted |
-| 0018 | `db-connection-budget` | Planned |
+| 0018 | `db-connection-budget` | Accepted |
 | 0019 | `gcp-is-a-standalone-environment` | Accepted |
-| 0020 | `contract-validation-over-port-forward` | Planned |
+| 0020 | `contract-validation-over-port-forward` | Accepted |
 | 0021 | `images-from-ghcr` | Accepted |
-| 0022 | `no-iam-administration-for-the-apply-account` | Planned |
+| 0022 | `no-iam-administration-for-the-apply-account` | Accepted |
 | 0023 | `proof-of-delivery-is-spelled-out` | Accepted |
 | 0024 | `seed-by-workflow` | Accepted |
 | 0025 | `approval-on-every-workflow` | Accepted |
@@ -91,7 +91,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0006: region-us-central1
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** Prices differ by region. `us-central1` is among the cheapest, and Cloud Storage's free allotment applies only in `us-central1`, `us-east1`, and `us-west1`. The environment is for a dev demonstration, with no data-residency requirement and no latency need.
 
@@ -101,7 +101,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0007: private-nodes-and-cloud-nat
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** The parent rules forbid public instance addresses. Nodes need to reach GHCR for images, GitHub, and Google APIs. Cloud NAT costs $0.0014 per VM-hour up to 32 VMs, about $0.005 per hour for the gateway's address, and $0.045 per GiB, about $4 to $6 a month at this size. Giving nodes public addresses would cost about the same per node and expose them.
 
@@ -111,7 +111,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0008: cloud-sql-shared-core-private-ip
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** The application needs PostgreSQL, and the code uses `psycopg`, so a managed Postgres keeps it unchanged. Options:
 
@@ -127,17 +127,17 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0009: pubsub-for-queues-and-notifications
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** AWS uses SQS with a DLQ, and EventBridge with a rule and a 7-day archive. Pub/Sub's first 10 GiB a month are free, and it has pull subscriptions, dead-letter policies, attribute filters, and topic retention with seek.
 
 **Decision:** Events: topic `shiptrack-carrier-events` with one pull subscription (ack deadline 60 s, retention 4 d, dead-letter after 5 attempts to a dead-letter topic with its own pull subscription kept 14 d). Notifications: topic `shiptrack-notifications` with 7-day retention and a subscription filtered on the attribute `detail_type`, with the same dead-letter setup. The publisher sets `idempotency_key` and `detail_type` as attributes. The Pub/Sub service agent gets the roles that dead-lettering needs.
 
-**Consequences:** Pub/Sub delivers at least once; the worker's `ON CONFLICT` makes that safe (risk G-R9). Unlike Azure, replay survives through topic retention. Filters match attributes only. The emulator's support for filters and dead-lettering is checked **[VERIFY]**.
+**Consequences:** Pub/Sub delivers at least once; the worker's `ON CONFLICT` makes that safe (risk G-R9). Unlike Azure, replay survives through topic retention. Filters match attributes only. The Pub/Sub emulator supports the filter and the dead-letter policy as used here, and the application's emulator tests exercise both (modern ADR-0032).
 
 ## ADR-0010: secret-manager-and-workload-identity
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** Service account keys are forbidden. Secret Manager gives six active versions and 10,000 accesses a month free. GKE can grant roles directly to a Kubernetes service account as an IAM principal, with no Google service account.
 
@@ -147,7 +147,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0011: cloud-storage-and-signed-urls
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** Proof of delivery is stored in S3 and downloaded through a `302` to a presigned URL. Signing a URL needs a private key or the IAM signing API, and keys are forbidden. Cloud Storage's first 5 GiB in `us-central1` are free.
 
@@ -219,21 +219,21 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0018: db-connection-budget
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** `db-f1-micro` has a small `max_connections`; the default is derived from memory, and the PostgreSQL value is not in the documentation that was reachable **[VERIFY with `SHOW max_connections` after the first apply]**. The Azure design budgets 21 connections for a similar server.
 
-**Decision:** A budget of 21 connections, with api capped at 2 replicas and worker-events at 2:
+**Decision:** A budget of 21 connections, with api at 2 replicas and worker-events at 1 (ADR-0012):
 
 | Consumer | Replicas | Connections each | Total |
 |---|---|---|---|
 | api (pool 4, overflow 2) | 2 | 6 | 12 |
-| worker-events (pool 2) | 2 | 2 | 4 |
+| worker-events (pool 2) | 1 | 2 | 2 |
 | sla-scan | 1 | 2 | 2 |
 | migrate | 1 | 2 | 2 |
-| **Total** | | | **20** |
+| **Total** | | | **18** |
 
-A unit test asserts that the pool settings times the replica maximums in `values-gcp.yaml` stay within the budget. If the measured limit is lower than the budget plus the superuser reserve, either set the `max_connections` flag or move up a tier.
+A check in `ci-checks` reads the pool settings and replica counts in `deploy/values-gcp.yaml` and fails if the sum exceeds the budget. This repository has no Python test setup, so the check is a small script. If the measured limit is lower than the budget plus the superuser reserve, either set the `max_connections` flag or move up a tier.
 
 **Consequences:** Replica counts are fixed (ADR-0012), so the arithmetic holds. Raising replicas or pools means re-running it.
 
@@ -249,11 +249,11 @@ A unit test asserts that the pool settings times the replica maximums in `values
 
 ## ADR-0020: contract-validation-over-port-forward
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** The contract suite sends routing headers that steer the AWS load balancer. With no public address (ADR-0013), a runner cannot reach the api directly.
 
-**Decision:** `ops-contract` runs on a GitHub-hosted runner as `shiptrack-deploy`, opens `kubectl port-forward` to the api service, and runs the suite with `BASE_URL=http://localhost:<port>`, `TARGET=modern`, an empty `TEST_TOKEN`, and `SINGLE_STACK=1`. The AWS token is never sent. The deploy account's role includes `pods/portforward` in the namespace.
+**Decision:** `ops-contract` runs on a GitHub-hosted runner as `shiptrack-deploy`, opens `kubectl port-forward` to the api service, and runs the suite with `BASE_URL=http://localhost:<port>`, `TARGET=modern`, an empty `TEST_TOKEN`, and `SINGLE_STACK=1`. The AWS token is never sent. The deploy account may port-forward in the namespace through Kubernetes RBAC (`pods/portforward`); whether GKE also requires an IAM permission for it is checked **[VERIFY]**.
 
 **Consequences:** The suite needs no change and no address is exposed. The workflow needs approval because it creates synthetic shipments. If the Gateway is enabled, the suite can run against its address instead.
 
@@ -269,7 +269,7 @@ A unit test asserts that the pool settings times the replica maximums in `values
 
 ## ADR-0022: no-iam-administration-for-the-apply-account
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** The AWS stack gives every role a permission boundary. An apply account that could create service accounts or edit project IAM could escalate itself, for example by impersonating the seed account. Limiting such grants with an IAM condition on resource names or granted roles depends on syntax that was not verified for service accounts.
 
