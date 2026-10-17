@@ -63,7 +63,9 @@ in the design and are added phase by phase.
 | G0 Design | Done: `docs/DESIGN.md` and `docs/ADR.md` |
 | G4 Seed | Done and applied: `apply-seed` ran twice, and the second run ended with "No changes". The state bucket, the five service accounts, and their trust exist. `dev` is protected, and the `seed` environment holds its secrets |
 | G8 Workflows | Partly: `ci-checks` and `apply-seed` are built. `ci-terraform`, `apply-terraform`, `deploy-app`, `ops-contract`, and the `destroy-` workflows are not. The `dev` and `ci` environments hold no secrets yet |
-| G1 to G3 Application seam, chart, image (in `shiptrack-modern`) | Not started |
+| G1 Application seam (in `shiptrack-modern`) | Done: `SHIPTRACK_CLOUD`, the GCP backends, and their emulator tests are merged (modern ADR-0032) |
+| G2 Chart switches (in `shiptrack-modern`) | Built and in review: `cloud`, `scaling.mode`, `spot`, the `gcp` block, and `PodMonitoring` (modern ADR-0033) |
+| G3 Image (in `shiptrack-modern`) | Not started |
 | G5 to G7 Data, cluster, and addons roots | Not started |
 | G9 to G11 Application, validation, operations | Not started |
 
