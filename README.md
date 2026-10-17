@@ -46,7 +46,8 @@ terraform/
   seed/                 state bucket, APIs, service accounts, GitHub trust, permissions
     scripts/            ci.sh (plan and apply), github-setup.sh (environments, branch protection)
   data/                 the network, Cloud SQL, the database secrets, Pub/Sub, and the proof-of-delivery bucket
-  modules/              network, cloud-sql, secrets, pubsub, proof-of-delivery-storage
+  cluster/              the GKE Autopilot cluster and the workloads' IAM bindings
+  modules/              network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, gke-autopilot, workload-access
   finops/               the monthly budget with alerts, and the dataset for the billing export
 .github/workflows/
   apply-seed.yml        applies terraform/seed
@@ -58,6 +59,8 @@ terraform/
   destroy-secrets.yml   takes the database secrets down
   destroy-pubsub.yml    takes the queues down
   destroy-proof-of-delivery-storage.yml  takes the document bucket down
+  destroy-cluster.yml   takes the cluster down
+  ops-check-cluster.yml proves the deploy account reaches the control plane
   ops-check-cost.yml    the month's cost from the billing export, read-only
 .github/scripts/        terraform-ci.sh (plan and apply a root), terraform-destroy.sh (destroy one group), cost-report.sh (the cost report)
 .checkov.yaml           checkov configuration
@@ -74,12 +77,13 @@ in the design and are added phase by phase.
 |---|---|
 | G0 Design | Done: `docs/DESIGN.md` and `docs/ADR.md` |
 | G4 Seed | Done and applied: `apply-seed` ran twice, and the second run ended with "No changes". The state bucket, the five service accounts, and their trust exist. `dev` is protected, and the `seed` environment holds its secrets |
-| G8 Workflows | Partly: `ci-checks`, `apply-seed`, `ci-terraform`, `apply-terraform`, and the `destroy-` workflows for the network, Cloud SQL, secrets, Pub/Sub, and the bucket are built. `deploy-app`, `ops-contract`, and the other `destroy-` workflows are not. The `ci` and `dev` environments hold their secrets |
+| G8 Workflows | Partly: `ci-checks`, `apply-seed`, `ci-terraform`, `apply-terraform`, and the `destroy-` workflows for the network, Cloud SQL, secrets, Pub/Sub, the bucket, and the cluster are built, and so is `ops-check-cluster`. `deploy-app`, `ops-contract`, and the other `destroy-` workflows are not. The `ci` and `dev` environments hold their secrets |
 | G1 Application seam (in `shiptrack-modern`) | Done: `SHIPTRACK_CLOUD`, the GCP backends, and their emulator tests are merged (modern ADR-0032) |
 | G2 Chart switches (in `shiptrack-modern`) | Built and in review: `cloud`, `scaling.mode`, `spot`, the `gcp` block, and `PodMonitoring` (modern ADR-0033) |
 | G3 Image (in `shiptrack-modern`) | Not started |
-| G5 Data root | Built and not yet applied: the network, Cloud SQL, the database secrets, Pub/Sub, and the proof-of-delivery bucket. Workload bindings follow the cluster (ADR-0029) |
-| G6 to G7 Cluster and addons roots | Not started |
+| G5 Data root | Done and applied: the network, Cloud SQL, the database secrets, Pub/Sub, and the proof-of-delivery bucket. Workload bindings follow the cluster (ADR-0029) |
+| G6 Cluster root | Built, not applied: the cluster and the workload bindings (ADR-0029). `ops-check-cluster` proves the DNS endpoint |
+| G7 Addons root | Not started |
 | FinOps (ADR-0028) | Done: the $50 budget with alerts, the email channel, and the export dataset are applied, and the usage cost export is on. `ops-check-cost` reads it |
 | G9 to G11 Application, validation, operations | Not started |
 

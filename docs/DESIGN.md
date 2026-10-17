@@ -301,7 +301,7 @@ The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUM
 **db-init:** `deploy/db-init/init.sql` creates the schema, the `shiptrack_app` and `shiptrack_migrator` roles, and their grants, as the Azure variant does. `deploy-app` runs it as a Job before the release, with the admin secret, and it is idempotent.
 
 ### 8.3 `terraform/cluster`
-GKE Autopilot cluster `shiptrack` in `us-central1`: release channel `REGULAR`, private nodes, the DNS-based control-plane endpoint on and the IP-based endpoint off, no authorized networks to maintain, Workload Identity on (Autopilot default), system and workload logging, managed Prometheus collection, `deletion_protection = true`, and the labels above **[VERIFY the Terraform arguments for the DNS endpoint]**.
+GKE Autopilot cluster `shiptrack` in `us-central1`: release channel `REGULAR`, private nodes, the DNS-based control-plane endpoint on and the IP-based endpoint off, no authorized networks to maintain, Workload Identity on (Autopilot default), system and workload logging, managed Prometheus collection, `deletion_protection = true`, cost allocation on so the billing export splits by namespace and label, and the labels above. The provider accepts the DNS endpoint arguments; that the cluster accepts them is checked at the first apply **[VERIFY]**.
 
 After the cluster, this root makes the workload bindings (§7.3), one `modules/workload-access` call per row, reading resource names from the `data` root's outputs (ADR-0029).
 
