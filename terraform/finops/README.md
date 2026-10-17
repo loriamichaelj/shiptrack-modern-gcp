@@ -1,6 +1,6 @@
 # terraform/finops
 
-Cost control for the project (ADR-0028). It is its own root so that taking the `data` groups down does not
+Cost control for the project. It is its own root so that taking the `data` groups down does not
 remove the budget or the cost history, and no `destroy-` workflow removes it.
 
 | File | Holds |

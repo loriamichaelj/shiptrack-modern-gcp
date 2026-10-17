@@ -1,6 +1,6 @@
 # proof-of-delivery-storage
 
-The proof-of-delivery bucket `shiptrack-proof-of-delivery-<random suffix>` (ADR-0011, ADR-0023): Standard class,
+The proof-of-delivery bucket `shiptrack-proof-of-delivery-<random suffix>`: Standard class,
 uniform access, public access prevention enforced, versioning off. The service account
 `shiptrack-proof-of-delivery`, which signs the download URLs, may read objects and nothing else.
 

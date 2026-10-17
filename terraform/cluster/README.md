@@ -1,11 +1,11 @@
 # terraform/cluster
 
-The GKE Autopilot cluster and the workloads' IAM bindings. Design: `docs/DESIGN.md` §8.3.
+The GKE Autopilot cluster and the workloads' IAM bindings. Design: `docs/DESIGN.md`.
 
 | File | Holds |
 |---|---|
 | `main.tf` | Reads the `data` root's outputs from its state, calls `gke-autopilot` for the cluster, and calls `workload-access` once per workload |
-| `locals.tf` | What each workload may use (design §7.3) |
+| `locals.tf` | What each workload may use |
 | `outputs.tf` | The cluster's name. Its endpoint is deliberately not an output |
 
 ## Running it
