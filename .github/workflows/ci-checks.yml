@@ -1,8 +1,7 @@
 name: ci-checks
 
 # Static checks on every pull request. None needs GCP access. Every job runs in the `ci` environment, so
-# the owner approves the run before any job starts (ADR-0025). The `chart` job joins when
-# deploy/values-gcp.yaml exists.
+# the owner approves the run before any job starts (ADR-0025).
 
 on:
   pull_request:
@@ -23,6 +22,9 @@ env:
   GITLEAKS_VERSION: "8.30.1"
   # sha256 of gitleaks_<version>_linux_x64.tar.gz, from the release's checksums file
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  KUBECONFORM_VERSION: "v0.8.0"
+  # sha256 of kubeconform-linux-amd64.tar.gz, from the release's checksums file
+  KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
   ACTIONLINT_VERSION: "1.7.12"
   # sha256 of actionlint_<version>_linux_amd64.tar.gz, from the release's checksums file
   ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
@@ -69,6 +71,74 @@ jobs:
       - name: Trivy config
         run: trivy config --severity HIGH,CRITICAL --skip-dirs "**/.terraform" --exit-code 1 .
 
+  # The chart from shiptrack-modern at the commit in deploy/chart-ref, rendered with the GCP values and the
+  # same --set arguments deploy-app uses (placeholders here), and the db-init Job. Validated, scanned, and
+  # checked against the database connection budget.
+  chart:
+    runs-on: ubuntu-24.04
+    environment: ci
+    env:
+      IMAGE_DIGEST: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      GCP_PROJECT_ID: example-project
+      GCP_PROOF_OF_DELIVERY_BUCKET: example-project-proof-of-delivery
+      GCP_PROOF_OF_DELIVERY_SIGNER: shiptrack-proof-of-delivery@example-project.iam.gserviceaccount.com
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the pinned chart commit
+        id: ref
+        run: echo "sha=$(tr -d '[:space:]' < deploy/chart-ref)" >>"$GITHUB_OUTPUT"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.repository_owner }}/shiptrack-modern
+          ref: ${{ steps.ref.outputs.sha }}
+          path: modern
+          persist-credentials: false
+      - name: Install kubeconform
+        run: |
+          url="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/kubeconform.tar.gz" "$url"
+          echo "${KUBECONFORM_SHA256}  $RUNNER_TEMP/kubeconform.tar.gz" | sha256sum --check --strict
+          mkdir "$RUNNER_TEMP/kubeconform-bin"
+          tar -xzf "$RUNNER_TEMP/kubeconform.tar.gz" -C "$RUNNER_TEMP/kubeconform-bin" kubeconform
+          echo "$RUNNER_TEMP/kubeconform-bin" >>"$GITHUB_PATH"
+      - name: Render the chart and the db-init Job
+        run: |
+          mapfile -t args < <(scripts/chart-args.sh)
+          helm lint modern/charts/shiptrack -f deploy/values-gcp.yaml "${args[@]}"
+          mkdir rendered
+          helm template shiptrack modern/charts/shiptrack -f deploy/values-gcp.yaml "${args[@]}" >rendered/chart.yaml
+          # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
+          {
+            cat deploy/db-init/serviceaccount.yaml
+            echo "---"
+            IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/shiptrack-modern@${IMAGE_DIGEST}" \
+              envsubst '${IMAGE} ${GCP_PROJECT_ID}' <deploy/db-init/job.yaml
+          } >rendered/db-init.yaml
+      - name: Validate (strict, with the CRD schemas)
+        run: |
+          crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          for f in rendered/*.yaml; do
+            kubeconform -strict -summary -kubernetes-version 1.34.0 -schema-location default -schema-location "$crds" "$f"
+          done
+      # Skipped, with the reason:
+      #   CKV_K8S_21  the namespace is set by `helm -n shiptrack`, not in the templates
+      #   CKV_K8S_11  no CPU limits on purpose, to avoid CFS throttling
+      #   CKV_K8S_9   the workers and jobs serve no traffic, so they have liveness and no readiness probe
+      #   CKV2_K8S_6  the namespace's default-deny NetworkPolicy, in the chart, covers the Job, but is not in its file
+      - name: Checkov on the rendered manifests
+        run: |
+          pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/chart.yaml --framework kubernetes --compact --quiet \
+            --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9
+          pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/db-init.yaml --framework kubernetes --compact --quiet \
+            --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
+      - name: Database connection budget
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "pyyaml==${PYYAML_VERSION}"
+          "$RUNNER_TEMP/venv/bin/python" scripts/check-connection-budget.py rendered/chart.yaml
+
   secrets:
     runs-on: ubuntu-24.04
     environment: ci
@@ -112,7 +182,7 @@ jobs:
       - name: actionlint
         run: actionlint -color
       - name: ShellCheck the scripts
-        run: shellcheck -x terraform/seed/scripts/*.sh .github/scripts/*.sh
+        run: shellcheck -x terraform/seed/scripts/*.sh .github/scripts/*.sh scripts/*.sh
       # Every job names an environment and every action is pinned to a commit SHA.
       - name: Workflow policy
         run: |

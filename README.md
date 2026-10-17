@@ -48,6 +48,7 @@ export), which is separate so that taking the others down keeps the cost history
 | `terraform/cluster/` | The GKE Autopilot cluster and the workloads' IAM bindings |
 | `terraform/addons/` | The `shiptrack` namespace and the deploy account's role in it |
 | `terraform/finops/` | The monthly budget with alerts, and the dataset for the billing export |
+| `deploy/`, `scripts/` | The Helm values, the pinned chart commit, and the db-init Job; the helper scripts that render the chart and check the connection budget |
 | `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, gke-autopilot, workload-access |
 | `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `ops-check-cluster`, and `ops-check-cost` |
 | `.github/scripts/` | The plan, apply, and destroy wrappers, which print addresses and actions only, and the cost report |
@@ -62,6 +63,7 @@ export), which is separate so that taking the others down keeps the cost history
 | Data, cluster, and add-ons | Done and applied; the deploy account reaches the cluster and only its own namespace |
 | FinOps | Done: the budget alerts, the cost export, and `ops-check-cost` |
 | Workflows | Built except `deploy-app` and `ops-contract` |
+| Deploy files | Built: the Helm values, the pinned chart, the db-init Job, and a pull request check that renders and scans them |
 | First release, validation, and operations | Not started: the `db-init` Job, the Helm values, `deploy-app`, the contract run, the preemption test, and the cost analysis |
 
 ## Getting started

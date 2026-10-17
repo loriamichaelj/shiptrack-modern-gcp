@@ -29,6 +29,10 @@ description = "A service account email with a real project. Use <SERVICE_ACCOUNT
 regex = '''[a-z][a-z0-9-]{4,}@[a-z][a-z0-9-]{4,}\.iam\.gserviceaccount\.com'''
 tags = ["identifier"]
 
+# The placeholder project used in examples and in the pull request checks is not an identifier.
+[rules.allowlist]
+regexes = ['''@example-project\.iam\.gserviceaccount\.com''']
+
 [[rules]]
 id = "workload-identity-resource-name"
 description = "A Workload Identity resource name that carries a project number. Build it from variables."
