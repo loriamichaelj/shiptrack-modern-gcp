@@ -309,7 +309,7 @@ After the cluster, this root makes the workload bindings (§7.3), one `modules/w
 Providers: `kubernetes`, authenticated with the apply account's short-lived token through the DNS endpoint.
 - Namespace `shiptrack` with the labels of §7.1.
 - A `Role` and `RoleBinding` that give the `shiptrack-deploy` account the workload kinds, `Job`/`CronJob`, `NetworkPolicy`, `PodMonitoring`, `pods/portforward`, and Secrets (Helm release storage) in that namespace only.
-- The `Gateway` and its policies are not here: they are applied by `deploy-app` from `deploy/gateway` (ADR-0031). This root gives the deploy account the right to manage them in the namespace.
+- The `Gateway` and its policies are not here: they are applied by `ops-ui-port` from `deploy/gateway` (ADR-0031). This root gives the deploy account the right to manage them in the namespace.
 
 ### 8.5 Applying
 `apply-terraform` runs the roots in order, each after its own approval. The agent prepares the code and runs `fmt`, `validate`, `tflint`, and `checkov`. Before each approval, the agent states what the pull request's plan will create, change, or destroy.

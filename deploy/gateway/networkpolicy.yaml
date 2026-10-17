@@ -1,0 +1,29 @@
+# Admits the load balancer to the api. The namespace denies all ingress by default, and the chart admits only the
+# metrics collectors. The regional load balancer's proxies connect from the proxy-only subnet
+# (terraform/modules/ui-ingress, keep the range in step), and Google's health checkers from the two ranges
+# Google documents for them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: shiptrack-allow-api-from-load-balancer
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: gateway
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: shiptrack
+      app.kubernetes.io/component: api
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 10.23.0.0/24
+        - ipBlock:
+            cidr: 35.191.0.0/16
+        - ipBlock:
+            cidr: 130.211.0.0/22
+      ports:
+        - protocol: TCP
+          port: 8000

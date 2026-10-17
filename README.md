@@ -48,10 +48,10 @@ export), which is separate so that taking the others down keeps the cost history
 | `terraform/cluster/` | The GKE Autopilot cluster and the workloads' IAM bindings |
 | `terraform/addons/` | The `shiptrack` namespace and the deploy account's role in it |
 | `terraform/finops/` | The monthly budget with alerts, and the dataset for the billing export |
-| `deploy/` | The Helm values, the pinned chart commit, and the db-init Job |
+| `deploy/` | The Helm values, the pinned chart commit, the db-init Job, and `gateway/`, the objects of the UI's load balancer |
 | `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, ui-ingress, gke-autopilot, workload-access |
-| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, `ops-contract`, `ops-check-cluster`, and `ops-check-cost` |
-| `scripts/` | The chart arguments, the connection budget check, the rollout sampler, and the contract run through a port-forward |
+| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, `ops-contract`, `ops-ui-port`, `ops-check-cluster`, and `ops-check-cost` |
+| `scripts/` | The chart arguments, the connection budget check, the rollout sampler, the contract run through a port-forward, and `ui-access.sh`, which opens and closes the browser URL from your machine |
 | `.github/scripts/` | The plan, apply, and destroy wrappers, which print addresses and actions only, and the cost report |
 
 ## Status
@@ -67,6 +67,26 @@ export), which is separate so that taking the others down keeps the cost history
 | First release | `deploy-app` has run: db-init, the migration, the Helm install, and the contract smoke suite passed on the first dispatch. The full contract suite (`ops-contract`) is built and has not run |
 | Deploy files | Built: the Helm values, the pinned chart, the db-init Job, and a pull request check that renders and scans them |
 | Validation and operations | Not started: the full contract run, the event-loss and preemption tests, the SLA check, and the cost analysis |
+
+## Opening the UI in a browser
+
+The application has no public address until you ask for one, and then only your own address can reach it.
+`kubectl port-forward` always works (see below). For a URL in a browser, from one address:
+
+```sh
+scripts/ui-access.sh open     # sets the allow-list to your current address and dispatches ops-ui-port open
+scripts/ui-access.sh url      # prints http://<address>/ui/
+scripts/ui-access.sh close    # admits nobody; the load balancer is still billed
+scripts/ui-access.sh remove   # deletes the load balancer and stops its charge
+```
+
+Approve the `dev` environment in GitHub when a run waits. The first `open` creates the load balancer and takes several
+minutes. Your address is kept in a masked secret, never in a workflow input, because inputs are public. The URL is plain
+HTTP, so what you do in the UI is not encrypted; the allow-list keeps everyone else out. The load balancer adds about
+$24 a month while it exists.
+
+Without a load balancer: `kubectl -n shiptrack port-forward svc/shiptrack-api 8000:8000`, then
+`http://localhost:8000/ui/`.
 
 ## Getting started
 

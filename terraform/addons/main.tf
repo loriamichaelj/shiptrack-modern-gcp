@@ -68,6 +68,20 @@ resource "kubernetes_role_v1" "deployer" {
     verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
   }
 
+  # The UI's load balancer (ADR-0031): the Gateway and its route, and the policies that attach the health check
+  # and the Cloud Armor policy to the api's backend. ops-ui-port applies and deletes them.
+  rule {
+    api_groups = ["gateway.networking.k8s.io"]
+    resources  = ["gateways", "httproutes"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
+  rule {
+    api_groups = ["networking.gke.io"]
+    resources  = ["gcpbackendpolicies", "healthcheckpolicies"]
+    verbs      = ["get", "list", "watch", "create", "update", "patch", "delete"]
+  }
+
   # Helm keeps each release in a Secret. They hold no application secret (design 12).
   rule {
     api_groups = [""]
