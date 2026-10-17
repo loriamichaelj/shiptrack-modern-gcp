@@ -3,25 +3,25 @@
 
 output "network_name" {
   description = "Name of the VPC."
-  value       = google_compute_network.this.name
+  value       = module.network.network_name
 }
 
 output "subnet_name" {
   description = "Name of the subnet."
-  value       = google_compute_subnetwork.this.name
+  value       = module.network.subnet_name
 }
 
 output "pods_range_name" {
   description = "Name of the subnet's secondary range for pods."
-  value       = "pods"
+  value       = module.network.pods_range_name
 }
 
 output "services_range_name" {
   description = "Name of the subnet's secondary range for services."
-  value       = "services"
+  value       = module.network.services_range_name
 }
 
 output "private_services_range_name" {
   description = "Name of the range reserved for Cloud SQL."
-  value       = google_compute_global_address.private_services.name
+  value       = module.network.private_services_range_name
 }

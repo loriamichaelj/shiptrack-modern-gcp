@@ -35,3 +35,15 @@ variable "private_services_prefix_length" {
   type        = number
   default     = 24
 }
+
+variable "deletion_protection" {
+  description = "Protects Cloud SQL from deletion. destroy-cloud-sql sets it to false inside its approved run (ADR-0027); every normal apply leaves it true."
+  type        = bool
+  default     = true
+}
+
+variable "db_credentials_version" {
+  description = "Raise to generate and write new database passwords. They are write-only, so Terraform sends them only when this changes."
+  type        = number
+  default     = 1
+}

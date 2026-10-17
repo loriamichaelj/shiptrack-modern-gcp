@@ -10,8 +10,14 @@
 # Both modes fail unless the CONFIRM environment variable equals <name>. As in terraform-ci.sh, only
 # addresses and actions are printed.
 #
+# A protected resource (Cloud SQL) cannot be destroyed while its protection is on, and the provider
+# reads the stored value when it deletes. When UNPROTECT_VAR names a Terraform variable, `destroy`
+# first applies the targets with that variable set to false, then destroys them with it still false.
+# The next normal apply sets the protection back for anything that remains (ADR-0027).
+#
 # Environment:
 #   CONFIRM              the value the person typed; must equal <name> (required)
+#   UNPROTECT_VAR        optional; a boolean variable that protects the targets while it is true
 #   GCP_PROJECT_ID       project that holds the resources (required)
 #   GCP_PROJECT_NUMBER   its number; part of the state bucket's name (required)
 #   GCP_REGION           region (default us-central1)
@@ -60,16 +66,17 @@ quietly() {
   rm -f "$out"
 }
 
+# summarize <plan> <step>: the addresses and actions of a saved plan, never values.
 summarize() {
-  local plan=$1 text
+  local plan=$1 step=$2 text
   text=$(terraform show -json "$plan" | jq -r '
     [.resource_changes[]? | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $changes
-    | (if ($changes | length) == 0 then "Nothing to destroy."
+    | (if ($changes | length) == 0 then "Nothing to change."
        else ($changes | map("- `\(.change.actions | join("+"))` \(.address)") | join("\n")) end)
-      + "\n\n\($changes | length) resource(s) would be destroyed.\n"')
+      + "\n\n\($changes | length) resource change(s).\n"')
   log "$text"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    printf '## destroy %s (%s)\n\n%s\n' "$name" "$mode" "$text" >>"$GITHUB_STEP_SUMMARY"
+    printf '## destroy %s: %s (%s)\n\n%s\n' "$name" "$step" "$mode" "$text" >>"$GITHUB_STEP_SUMMARY"
   fi
 }
 
@@ -85,9 +92,23 @@ BACKEND
 targets=()
 for address in "$@"; do targets+=("-target=${address}"); done
 
+unprotect=()
+if [[ -n "${UNPROTECT_VAR:-}" ]]; then
+  [[ "$UNPROTECT_VAR" =~ ^[a-z_]+$ ]] || { echo "bad UNPROTECT_VAR" >&2; exit 2; }
+  unprotect=(-var "${UNPROTECT_VAR}=false")
+fi
+
 quietly terraform init -input=false
-quietly terraform plan -destroy -input=false -lock-timeout=120s "${targets[@]}" -out=tfplan
-summarize tfplan
+
+if [[ "$mode" == destroy && ${#unprotect[@]} -gt 0 ]]; then
+  log "Lowering the protection (${UNPROTECT_VAR}) on the targets."
+  quietly terraform plan -input=false -lock-timeout=120s "${targets[@]}" "${unprotect[@]}" -out=unprotect.tfplan
+  summarize unprotect.tfplan "lower the protection"
+  quietly terraform apply -input=false -lock-timeout=120s unprotect.tfplan
+fi
+
+quietly terraform plan -destroy -input=false -lock-timeout=120s "${targets[@]}" "${unprotect[@]}" -out=tfplan
+summarize tfplan "destroy"
 
 if [[ "$mode" == destroy ]]; then
   quietly terraform apply -input=false -lock-timeout=120s tfplan
