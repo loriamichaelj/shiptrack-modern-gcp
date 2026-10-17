@@ -8,7 +8,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0002 | `github-oidc-and-workload-identity-federation` | Accepted |
 | 0003 | `tags-and-labels` | Accepted |
 | 0004 | `cost-is-a-design-constraint` | Accepted |
-| 0005 | `gke-autopilot-with-spot-pods` | Planned |
+| 0005 | `gke-autopilot-with-spot-pods` | Accepted |
 | 0006 | `region-us-central1` | Planned |
 | 0007 | `private-nodes-and-cloud-nat` | Planned |
 | 0008 | `cloud-sql-shared-core-private-ip` | Planned |
@@ -16,7 +16,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0010 | `secret-manager-and-workload-identity` | Planned |
 | 0011 | `cloud-storage-and-signed-urls` | Planned |
 | 0012 | `fixed-replicas-without-keda` | Planned |
-| 0013 | `no-public-ingress-by-default` | Planned |
+| 0013 | `no-public-ingress-by-default` | Accepted |
 | 0014 | `observability-stack` | Planned |
 | 0015 | `deploy-by-workflow` | Accepted |
 | 0016 | `state-in-cloud-storage` | Accepted |
@@ -74,7 +74,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0005: gke-autopilot-with-spot-pods
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** The GKE management fee is $0.10 per cluster-hour, and a $74.40 monthly credit per billing account covers one Autopilot or zonal cluster. This project is the only one on its billing account, and no other project there has a cluster. The workload requests about 0.65 vCPU and 0.9 GiB (design §7.2).
 
@@ -87,7 +87,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 **Decision:** GKE Autopilot with every workload on Spot pods (`cloud.google.com/gke-spot: "true"`), a `spot` value to turn it off. Autopilot does not bill for system pods, scales its nodes to the pods, and enforces a restricted security baseline by default.
 
-**Consequences:** Spot capacity can be reclaimed at any time, so both api replicas can go together for a short outage (risk G-R2). Workers are idempotent, so a cut-off message is redelivered and applied once. Autopilot rounds requests up to its minimums, which can raise the bill (risk G-R14). Prices and minimums are checked against the pricing page **[VERIFY]**. An Arm compute class may be cheaper and is tested after the first deploy **[VERIFY]**.
+**Consequences:** Spot capacity can be reclaimed at any time, so both api replicas can go together for a short outage (risk G-R2). Spot pods can also stay Pending when capacity is short, which would time out a `--atomic` deploy and roll it back **[VERIFY how often]**. If preemption or Pending pods hurt, `spot: false` costs roughly $15 to $19 more a month. Workers are idempotent, so a cut-off message is redelivered and applied once. Autopilot rounds requests up to its minimums, which can raise the bill (risk G-R14). Prices and minimums are checked against the pricing page **[VERIFY]**. An Arm compute class may be cheaper and is tested after the first deploy **[VERIFY]**.
 
 ## ADR-0006: region-us-central1
 
@@ -167,13 +167,15 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 
 ## ADR-0013: no-public-ingress-by-default
 
-**Status:** Planned
+**Status:** Accepted
 
 **Context:** Any public address on GCP goes through a load balancer forwarding rule at $0.025 per hour, about $18 a month, which is more than the compute. Restricting it to allow-listed addresses needs Cloud Armor, about $6 more **[VERIFY both]**. GCP is a standalone environment outside the AWS cutover (ADR-0019), so nothing requires an address.
 
 **Decision:** No public address by default. The api is a `ClusterIP` service. Operators open the UI and API with `kubectl port-forward` through the DNS endpoint, which needs IAM permission only. The contract run uses the same path (ADR-0020). The chart and the `addons` root can create a regional external Application Load Balancer through Gateway API when `gateway_enabled` is true. Enabling it is its own pull request, with its own ADR for the domain, TLS certificate, and Cloud Armor allow-list; the allow-listed CIDR goes in a masked secret and never becomes a `for_each` key.
 
 **Consequences:** Saves about $18 to $24 a month. A port-forward gives the operator `http://localhost:<port>/ui/` on their own machine, for as long as the command runs. It is not a URL that anyone else can open, so the UI is not reachable by people without cluster access, which limits demonstrations. The network policy allows Google's health-check and proxy ranges only when the Gateway is on.
+
+**Demonstrations.** Only the operator opens the app, so the demo is given from the operator's machine: `kubectl port-forward` to the api service, at no extra cost. The Gateway is not built. It is revisited only if a port-forward through the cluster's DNS endpoint turns out not to work for the demo, or if someone else needs to open the app; it would then be its own pull request and ADR, with a domain and a certificate, and enabled only for the event.
 
 ## ADR-0014: observability-stack
 
