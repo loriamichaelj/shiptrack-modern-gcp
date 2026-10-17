@@ -1,6 +1,6 @@
 # terraform/addons
 
-The `shiptrack` namespace and what the deploy account may do in it. Design: `docs/DESIGN.md` §8.4.
+The `shiptrack` namespace and what the deploy account may do in it. Design: `docs/DESIGN.md`.
 
 | File | Holds |
 |---|---|
@@ -8,7 +8,7 @@ The `shiptrack` namespace and what the deploy account may do in it. Design: `doc
 | `locals.tf` | The labels and the deploy account's Kubernetes user name, which is its email |
 
 GKE gives the deploy account nothing in the cluster through IAM beyond fetching credentials, so the role is
-everything it can do. There is no Gateway: it is not built (ADR-0013).
+everything it can do. There is no Gateway: it is not built.
 
 ## Running it
 

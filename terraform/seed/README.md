@@ -5,8 +5,8 @@ APIs, the five service accounts, the trust that lets GitHub jobs act as three of
 permissions.
 
 It is applied **only** by `.github/workflows/apply-seed.yml`, using a seed service account that
-you create by hand once. Nothing is applied from a workstation. See `docs/DESIGN.md` §8 for the
-design and `docs/ADR.md` (ADR-0002, ADR-0024) for the decisions.
+you create by hand once. Nothing is applied from a workstation. See `docs/DESIGN.md` for the
+design and `docs/ADR.md` for the decisions.
 
 ## What it creates
 
@@ -159,7 +159,7 @@ done
 
 ## Billing (by hand, for the cost budget)
 
-The budget and the cost report (ADR-0028) need two roles on the billing account. Billing account
+The budget and the cost report need two roles on the billing account. Billing account
 permissions are outside the project, so the seed root cannot grant them. Run once, after the first
 `apply-seed` that creates the accounts:
 
@@ -197,7 +197,7 @@ Every subject names an environment that needs your approval, so no job reaches a
 `apply` and `deploy` share a subject, so either can be requested by any job in the `dev` environment.
 The workflows, which reach `dev` only through a reviewed pull request, choose which one they use.
 `ci` admits any branch, because a pull request run has a pull request ref; the plan account is
-read-only, and you see the run before approving it (ADR-0025).
+read-only, and you see the run before approving it.
 
 ## State layout
 

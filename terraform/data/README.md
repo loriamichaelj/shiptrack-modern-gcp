@@ -1,13 +1,13 @@
 # terraform/data
 
 The network, Cloud SQL, the database credentials, Pub/Sub, and the proof-of-delivery bucket. Workload
-bindings follow the cluster (ADR-0029). Design: `docs/DESIGN.md` §8.2.
+bindings follow the cluster. Design: `docs/DESIGN.md`.
 
 | File | Holds |
 |---|---|
-| `main.tf` | The `network` module (`../modules/network`): VPC, subnet with secondary ranges for pods and services, router and Cloud NAT, and the range and peering for private services access (ADR-0007) |
+| `main.tf` | The `network` module (`../modules/network`): VPC, subnet with secondary ranges for pods and services, router and Cloud NAT, and the range and peering for private services access |
 | `main.tf` (cont.) | The `cloud_sql`, `secrets`, `pubsub`, and `proof_of_delivery_storage` modules, in `../modules` |
-| `credentials.tf` | The database passwords, as ephemeral values: generated for one run, never stored (ADR-0017) |
+| `credentials.tf` | The database passwords, as ephemeral values: generated for one run, never stored |
 | `outputs.tf` | Names the other roots look resources up by. Nothing here is secret, and no workflow prints it |
 
 ## Running it

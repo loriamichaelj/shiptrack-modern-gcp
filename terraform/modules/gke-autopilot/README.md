@@ -1,6 +1,6 @@
 # gke-autopilot
 
-The cluster `shiptrack` (ADR-0005, ADR-0007): Autopilot, private nodes behind Cloud NAT, the regular release
+The cluster `shiptrack`: Autopilot, private nodes behind Cloud NAT, the regular release
 channel, Workload Identity, and managed Prometheus. The control plane has its DNS endpoint on and its IP
 endpoint off, so IAM is the gate and there is no address to allow-list or leak. Nodes run as the account
 `shiptrack-gke-node`. Cost allocation is on, so the billing export splits by namespace and label.
