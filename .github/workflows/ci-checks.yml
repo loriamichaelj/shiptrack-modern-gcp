@@ -112,7 +112,7 @@ jobs:
       - name: actionlint
         run: actionlint -color
       - name: ShellCheck the scripts
-        run: shellcheck terraform/seed/scripts/*.sh
+        run: shellcheck -x terraform/seed/scripts/*.sh .github/scripts/*.sh
       # Every job names an environment and every action is pinned to a commit SHA.
       - name: Workflow policy
         run: |
