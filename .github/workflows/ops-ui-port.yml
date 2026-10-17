@@ -1,0 +1,147 @@
+name: ops-ui-port
+
+# Opens and closes the browser URL of the application (ADR-0031). The URL is the UI load balancer's reserved
+# address over plain HTTP, behind a Cloud Armor policy that admits only the ranges in the `GCP_UI_ALLOWED_CIDRS`
+# secret of the `dev` environment. The secret is never an input: inputs are printed on a public run page.
+# `scripts/ui-access.sh` on the owner's machine sets the secret to the current address and dispatches this.
+#
+#   status  reports whether the port is open and whether the load balancer exists
+#   open    admits the ranges in the secret, then creates the load balancer if it is not there
+#   close   admits nobody (the allow rule holds an unroutable address); the load balancer is still billed
+#   remove  closes the port and deletes the load balancer, which stops its charge
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "status, open, close, or remove"
+        required: true
+        type: choice
+        options:
+          - status
+          - open
+          - close
+          - remove
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-port
+  cancel-in-progress: false
+
+env:
+  POLICY: shiptrack-ui
+  PRIORITY: "1000"
+  CLOSED_RANGE: 192.0.2.1/32
+  NAMESPACE: shiptrack
+
+jobs:
+  ui-port:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Mask the ranges before any step can print them, and refuse anything wide: one address, or a small range.
+      - name: Read the allow-list
+        id: ranges
+        if: inputs.action == 'open'
+        env:
+          CIDRS: ${{ secrets.GCP_UI_ALLOWED_CIDRS }}
+        run: |
+          [[ -n "$CIDRS" ]] || { echo "::error::GCP_UI_ALLOWED_CIDRS is empty in the dev environment. Run scripts/ui-access.sh open on your machine."; exit 1; }
+          echo "::add-mask::$CIDRS"
+          IFS=',' read -ra list <<<"$CIDRS"
+          ((${#list[@]} <= 10)) || { echo "::error::Cloud Armor takes at most 10 ranges in a rule"; exit 1; }
+          for range in "${list[@]}"; do
+            echo "::add-mask::$range"
+            [[ "$range" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/(2[4-9]|3[0-2])$ ]] \
+              || { echo "::error::an entry of the secret is not an IPv4 range of /24 or smaller"; exit 1; }
+          done
+          echo "ranges=$CIDRS" >>"$GITHUB_OUTPUT"
+
+      # The Cloud Armor rule is changed as the apply account, which holds the security admin role.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+      - name: Set the allow rule
+        env:
+          ACTION: ${{ inputs.action }}
+          RANGES: ${{ steps.ranges.outputs.ranges }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          region=${GCP_REGION:-us-central1}
+          common=(--security-policy="$POLICY" --region="$region" --project="$GCP_PROJECT_ID")
+          case "$ACTION" in
+            open) range_arg=$RANGES ;;
+            close | remove) range_arg=$CLOSED_RANGE ;;
+            status)
+              state=$(gcloud compute security-policies rules describe "$PRIORITY" "${common[@]}" --format=json 2>/dev/null \
+                | jq -r 'if .match.config.srcIpRanges == ["192.0.2.1/32"] then "closed" else "open for \(.match.config.srcIpRanges | length) range(s)" end')
+              echo "Cloud Armor allow rule: ${state:-unknown}"
+              exit 0
+              ;;
+          esac
+          # gcloud prints the rule it changed, which holds the range, so its output is not shown.
+          if ! out=$(gcloud compute security-policies rules update "$PRIORITY" "${common[@]}" --action=allow \
+            --src-ip-ranges="$range_arg" --quiet 2>&1 >/dev/null); then
+            echo "::error::the allow rule could not be updated"
+            printf '%s\n' "${out//"$range_arg"/***}" | head -n 5
+            exit 1
+          fi
+          if [[ "$ACTION" == open ]]; then echo "The allow rule admits the ranges in the secret."; else echo "The allow rule admits nobody."; fi
+
+      # The load balancer is Kubernetes objects, so the rest runs as the deploy account.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+
+      # The policies go first and the Gateway last, so the load balancer never serves without the Cloud Armor policy.
+      - name: Create the load balancer
+        if: inputs.action == 'open'
+        run: |
+          kubectl apply -f deploy/gateway/networkpolicy.yaml -f deploy/gateway/backend-policy.yaml -f deploy/gateway/health-check.yaml
+          kubectl apply -f deploy/gateway/gateway.yaml -f deploy/gateway/route.yaml
+          echo "Waiting for the load balancer; the first one takes several minutes."
+          kubectl -n "$NAMESPACE" wait --for=condition=Programmed gateway/shiptrack-ui --timeout=900s \
+            || { kubectl -n "$NAMESPACE" get gateway shiptrack-ui -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason} {.message}{"\n"}{end}' | sed -E 's/\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b/<IP>/g'; exit 1; }
+
+      - name: Delete the load balancer
+        if: inputs.action == 'remove'
+        run: |
+          kubectl delete -f deploy/gateway/route.yaml -f deploy/gateway/gateway.yaml -f deploy/gateway/health-check.yaml \
+            -f deploy/gateway/backend-policy.yaml -f deploy/gateway/networkpolicy.yaml --ignore-not-found --wait=true
+          echo "The Gateway is deleted; Google removes the forwarding rule, which stops its charge."
+
+      # Conditions only: the Gateway's status also holds the address, which a public log must not show.
+      - name: Report the load balancer
+        if: always() && (inputs.action == 'status' || inputs.action == 'open')
+        run: |
+          if kubectl -n "$NAMESPACE" get gateway shiptrack-ui >/dev/null 2>&1; then
+            kubectl -n "$NAMESPACE" get gateway shiptrack-ui -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+          else
+            echo "There is no load balancer."
+          fi

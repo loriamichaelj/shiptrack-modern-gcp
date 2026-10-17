@@ -1,7 +1,7 @@
 # What a regional external Application Load Balancer needs before the Gateway in deploy/gateway can create it
 # (ADR-0031): a subnet for its proxies, a reserved regional address, and a Cloud Armor policy that admits one
 # address and nothing else. The Gateway, the route, and the policies that bind these are Kubernetes objects
-# applied by deploy-app, so Terraform makes no load balancer itself.
+# applied by ops-ui-port, so Terraform makes no load balancer itself.
 #
 # The API has no login, so the load balancer must not be open. The policy denies everyone, and one allow rule
 # admits the range in a masked secret. The rule's range is changed by the ops-ui-port workflow (open, close),

@@ -116,6 +116,7 @@ jobs:
             IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/shiptrack-modern@${IMAGE_DIGEST}" \
               envsubst '${IMAGE} ${GCP_PROJECT_ID}' <deploy/db-init/job.yaml
           } >rendered/db-init.yaml
+          for f in deploy/gateway/*.yaml; do echo '---'; cat "$f"; done >rendered/gateway.yaml
       - name: Validate (strict, with the CRD schemas)
         run: |
           crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'

@@ -1,0 +1,18 @@
+# Attaches the Cloud Armor policy of terraform/modules/ui-ingress to the api's backend, so only the range that
+# ops-ui-port opens can reach it. It is applied before the Gateway so that the load balancer never serves
+# without it.
+apiVersion: networking.gke.io/v1
+kind: GCPBackendPolicy
+metadata:
+  name: shiptrack-api
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: gateway
+spec:
+  default:
+    securityPolicy: shiptrack-ui
+  targetRef:
+    group: ""
+    kind: Service
+    name: shiptrack-api

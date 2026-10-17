@@ -1,0 +1,21 @@
+# The load balancer checks /readyz, which is green only when the database and the schema revision are, and not
+# the default path /, which the application does not serve.
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: shiptrack-api
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: gateway
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        requestPath: /readyz
+        port: 8000
+  targetRef:
+    group: ""
+    kind: Service
+    name: shiptrack-api
