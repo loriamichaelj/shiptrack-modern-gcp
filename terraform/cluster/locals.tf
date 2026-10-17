@@ -46,10 +46,12 @@ locals {
       bucket_object_user       = false
       may_sign_as              = null
     }
+    # db-init connects as the administrator and sets the application's and the migrator's passwords, so it
+    # reads all three credentials (ADR-0030).
     db-init = {
       topics_publisher         = []
       subscriptions_subscriber = []
-      secrets_accessor         = [local.secrets["admin"]]
+      secrets_accessor         = [local.secrets["admin"], local.secrets["app"], local.secrets["migrator"]]
       bucket_object_user       = false
       may_sign_as              = null
     }

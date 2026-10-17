@@ -33,6 +33,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0027 | `destroy-workflow-per-cost-bearing-resource` | Accepted |
 | 0028 | `finops-budget-and-cost-export` | Accepted |
 | 0029 | `workload-bindings-follow-the-cluster` | Accepted |
+| 0030 | `db-init-runs-the-app-image` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -382,3 +383,13 @@ No automatic stop. A rule that scales the cluster to zero or detaches billing wh
 **Decision:** The data root creates the resources and no workload binding. The bindings are made by the cluster root, in `modules/workload-access`, one call per row of design §7.3, after the cluster exists. The cluster root reads the resource names from the data root's outputs through its remote state, which the plan and apply accounts can both read. The exceptions are bindings that name no workload: Pub/Sub's service agent on the dead-letter topics and subscriptions, and the signer's read access to the bucket. They stay with the resource they bind, in the data root.
 
 **Consequences:** A destroy of a data group never leaves a binding behind, because the cluster, and its bindings, come down first (ADR-0027 order: addons, cluster, then the data groups). Recreating the cluster recreates the bindings. The data root can be applied, and paid for, before the cluster exists, with nothing in it that the cluster needs to find. The cluster root now needs a read of the data root's state and permission to set IAM on topics, subscriptions, secrets, and the bucket, which the apply account has through its service admin roles (ADR-0022). If the first cluster shows that the bindings can be made before it exists, they can move into the data root without a change to the workloads.
+
+## ADR-0030: db-init-runs-the-app-image
+
+**Status:** Accepted
+
+**Context:** The design had `deploy-app` run a `psql` Job from `deploy/db-init/init.sql` with the administrator's secret. The Job also has to give the two application roles their passwords, and those are in their own secrets, which `shiptrack-db-init` could not read. A `psql` Job also needs a second image with a way to fetch secrets, and nothing in it could be tested before the cluster. Cloud SQL's administrator is not a superuser and the database is reachable only from the cluster, so the roles cannot be made from a runner.
+
+**Decision:** The Job runs `python -m shiptrack db-init` from the release's own image (shiptrack-modern ADR-0035). The command reads the three credentials through the application's secret source and runs `db/init.sql`, which is in the image. `shiptrack-db-init` is bound as `secretAccessor` on the administrator's, the application's, and the migrator's secrets, each on the single secret. The Job manifest and its service account are in `deploy/db-init/`, and `deploy-app` applies the service account and creates the Job. The roles' connection limits come from the connection budget (ADR-0018): 18 for the application and 3 for the migrator.
+
+**Consequences:** There is one image on every cloud and nothing extra to pull or pin. The command is tested against PostgreSQL in `shiptrack-modern`. The cluster root makes 13 workload bindings instead of 11, two more on the db-init principal, and applying it adds them. A rotation is a raise of `db_credentials_version` in the data root, an apply, and a run of `deploy-app`, whose db-init Job resets both passwords. Cloud SQL's own role setup is proven only by the first run **[VERIFY]**.

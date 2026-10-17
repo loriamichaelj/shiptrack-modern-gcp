@@ -113,7 +113,7 @@ shiptrack-modern-gcp/
 ├── deploy/
 │   ├── values-gcp.yaml                # non-identifying Helm values for cloud=gcp
 │   ├── chart-ref                      # pinned shiptrack-modern commit SHA
-│   └── db-init/                  # Job manifest and init.sql (schema, roles, grants)
+│   └── db-init/                  # Job manifest; the SQL is db/init.sql in the application image (ADR-0030)
 ├── scripts/                           # render checks, local helpers
 ├── .github/
 │   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, ops-contract
@@ -236,7 +236,7 @@ Autopilot bills requests and rounds them up to its own minimums and ratios **[VE
 | `shiptrack-worker-notify` | `pubsub.subscriber` on the notification subscription |
 | `shiptrack-sla-scan` | `secretmanager.secretAccessor` on the app secret |
 | `shiptrack-migrate` | `secretmanager.secretAccessor` on the migrator secret |
-| `shiptrack-db-init` | `secretmanager.secretAccessor` on the admin secret |
+| `shiptrack-db-init` | `secretmanager.secretAccessor` on the admin, app, and migrator secrets (ADR-0030) |
 
 Each binding is on the single resource, never on the project. The principal is the Kubernetes service account named in the namespace `shiptrack`. The signer service account has `storage.objectViewer` on the bucket and nothing else, so a signed URL can only read.
 
@@ -298,7 +298,7 @@ The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUM
 
 **Naming:** `shiptrack-` prefix for resources; globally unique names (bucket) add a `random_string` suffix. No identifier is hardcoded.
 
-**db-init:** `deploy/db-init/init.sql` creates the schema, the `shiptrack_app` and `shiptrack_migrator` roles, and their grants, as the Azure variant does. `deploy-app` runs it as a Job before the release, with the admin secret, and it is idempotent.
+**db-init:** the application image has a command, `python -m shiptrack db-init`, that reads the administrator's, the application's, and the migrator's credentials from Secret Manager and runs `db/init.sql`: it creates the `shiptrack_app` and `shiptrack_migrator` roles and sets their passwords, creates the schema, and grants the application data access (shiptrack-modern ADR-0035). `deploy-app` runs it as a Job from `deploy/db-init/job.yaml`, with the release's image digest, before the release. It is idempotent, and running it again after a rotation resets both passwords (ADR-0030).
 
 ### 8.3 `terraform/cluster`
 GKE Autopilot cluster `shiptrack` in `us-central1`: release channel `REGULAR`, private nodes, the DNS-based control-plane endpoint on and the IP-based endpoint off, no authorized networks to maintain, Workload Identity on (Autopilot default), system and workload logging, managed Prometheus collection, `deletion_protection = true`, cost allocation on so the billing export splits by namespace and label, and the labels above. The provider accepts the DNS endpoint arguments; that the cluster accepts them is checked at the first apply **[VERIFY]**.
