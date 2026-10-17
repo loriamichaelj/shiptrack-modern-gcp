@@ -43,7 +43,11 @@ export TF_VAR_region=${GCP_REGION:-us-central1}
 export CLOUDSDK_CORE_PROJECT=$GCP_PROJECT_ID
 export TF_IN_AUTOMATION=1 TF_INPUT=0
 
-cd "$(dirname "${BASH_SOURCE[0]}")/../../terraform/${root}"
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=redact.sh
+source "$here/redact.sh"
+
+cd "$here/../../terraform/${root}"
 
 bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
 echo "::add-mask::$GCP_PROJECT_ID"
@@ -52,18 +56,12 @@ echo "::add-mask::$bucket"
 
 log() { printf '%s\n' "$*"; }
 
-# Hide the project and its number from anything printed on a failure.
-redact() {
-  sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER}/***/g" \
-    -e "s/${GCP_BILLING_ACCOUNT_ID:-@@none@@}/***/g" -e "s/${GCP_ALERT_EMAIL:-@@none@@}/***/g"
-}
-
 # Run a terraform command quietly; show its output (redacted) only if it fails.
 quietly() {
   local out
   out=$(mktemp)
   if ! "$@" >"$out" 2>&1; then
-    redact <"$out" >&2
+    print_failure "$out"
     rm -f "$out"
     return 1
   fi
@@ -95,7 +93,12 @@ state_object_state() {
   elif grep -qE '404|does not exist|not found|NOT_FOUND' <<<"$output"; then
     echo missing
   else
-    echo "state check failed: $(redact <<<"$output")" >&2
+    local failure
+    failure=$(mktemp)
+    printf '%s\n' "$output" >"$failure"
+    echo "state check failed:" >&2
+    print_failure "$failure"
+    rm -f "$failure"
     return 1
   fi
 }

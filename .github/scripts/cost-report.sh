@@ -9,6 +9,7 @@
 # Environment:
 #   GCP_PROJECT_ID   project that the export covers (required)
 #   BUDGET_USD       monthly budget to compare with (default 50, as terraform/finops)
+#   GCP_PROJECT_NUMBER  optional; also hidden from error text
 #   GCP_REGION       location of the export dataset (default us-central1)
 set -euo pipefail
 
@@ -35,38 +36,54 @@ net='cost + IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) AS c), 0)'
 from="FROM \`${GCP_PROJECT_ID}.${dataset}.gcp_billing_export_v1_*\`
 WHERE project.id = @project AND usage_start_time >= @start_ts AND usage_start_time < @end_ts"
 
-query() {
-  bq --project_id="$GCP_PROJECT_ID" --location="${GCP_REGION:-us-central1}" query --quiet --use_legacy_sql=false --format=json --max_rows=1000 \
-    --parameter="project::${GCP_PROJECT_ID}" \
-    --parameter="start_ts:TIMESTAMP:${start}" \
-    --parameter="end_ts:TIMESTAMP:${end}" "$1"
-}
-
 out=$(mktemp)
-trap 'rm -f "$out"' EXIT
+err=$(mktemp)
+trap 'rm -f "$out" "$err"' EXIT
+
+# bq wraps long lines, which can split the project ID across two lines where a log mask no longer
+# matches it. Join the lines before hiding the ID, and hide the project number as well.
+scrub() { tr -d '\n' | sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER:-@@none@@}/***/g"; }
 emit() { printf '%s\n' "$*" | tee -a "$out"; }
 
-by_service=$(query "SELECT service.description AS service,
+# run_query <sql>: the JSON rows go to $result. bq prints warnings to stderr even when the query works, so
+# stderr is kept apart and joins $result only on a failure.
+run_query() {
+  if result=$(bq --project_id="$GCP_PROJECT_ID" --location="${GCP_REGION:-us-central1}" query --quiet \
+    --use_legacy_sql=false --format=json --max_rows=1000 \
+    --parameter="project::${GCP_PROJECT_ID}" \
+    --parameter="start_ts:TIMESTAMP:${start}" \
+    --parameter="end_ts:TIMESTAMP:${end}" "$1" 2>"$err"); then
+    return 0
+  fi
+  result="${result}$(cat "$err")"
+  return 1
+}
+
+run_query "SELECT service.description AS service,
   ROUND(SUM(cost), 2) AS gross,
   ROUND(SUM(IFNULL((SELECT SUM(c.amount) FROM UNNEST(credits) AS c), 0)), 2) AS credits,
   ROUND(SUM(${net}), 2) AS net
-${from} GROUP BY service ORDER BY net DESC" 2>&1) || {
-  if grep -qiE 'not found|does not exist' <<<"$by_service"; then
+${from} GROUP BY service ORDER BY net DESC" || {
+  # Wrapping also removes the spaces between words, so match with the whitespace taken out.
+  if tr -d ' \n' <<<"$result" | grep -qiE 'notfound|doesnotexist|doesnotmatchanytable'; then
     emit "## Cost for ${month}"
     emit
     emit "There is no billing export data yet. The export fills the dataset within a day of being switched on."
     [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] && cat "$out" >>"$GITHUB_STEP_SUMMARY"
     exit 0
   fi
-  echo "cost query failed: ${by_service//${GCP_PROJECT_ID}/***}" >&2
+  echo "cost query failed: $(scrub <<<"$result")" >&2
   exit 1
 }
+by_service=$result
 
-by_label=$(query "SELECT IFNULL((SELECT l.value FROM UNNEST(labels) AS l WHERE l.key = 'name'), '(no name label)') AS name,
+run_query "SELECT IFNULL((SELECT l.value FROM UNNEST(labels) AS l WHERE l.key = 'name'), '(no name label)') AS name,
   ROUND(SUM(${net}), 2) AS net
-${from} GROUP BY name ORDER BY net DESC")
-by_day=$(query "SELECT FORMAT_DATE('%Y-%m-%d', DATE(usage_start_time)) AS day, ROUND(SUM(${net}), 2) AS net
-${from} GROUP BY day ORDER BY day")
+${from} GROUP BY name ORDER BY net DESC" || { echo "cost query failed: $(scrub <<<"$result")" >&2; exit 1; }
+by_label=$result
+run_query "SELECT FORMAT_DATE('%Y-%m-%d', DATE(usage_start_time)) AS day, ROUND(SUM(${net}), 2) AS net
+${from} GROUP BY day ORDER BY day" || { echo "cost query failed: $(scrub <<<"$result")" >&2; exit 1; }
+by_day=$result
 
 total=$(jq -r '[.[].net | tonumber] | add // 0' <<<"$by_service")
 covered=$(jq -r 'length' <<<"$by_day")
