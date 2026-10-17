@@ -116,8 +116,9 @@ shiptrack-modern-gcp/
 │   └── db-init/                  # Job manifest and init.sql (schema, roles, grants)
 ├── scripts/                           # render checks, local helpers
 ├── .github/
-│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, deploy-app, ops-contract
+│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, ops-contract
 │   ├── scripts/terraform-ci.sh        # plan/apply wrapper for data, cluster, and addons that masks identifiers
+│   ├── scripts/terraform-destroy.sh   # shared by every destroy-* workflow (ADR-0027)
 │   └── dependabot.yml                 # github-actions, terraform
 ├── .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
 └── README.md
@@ -328,6 +329,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | `ci-terraform` | pull request | In environment `ci`, `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
 | `apply-seed` | dispatch | Applies `terraform/seed` as the seed account: two jobs in the `seed` environment, plan then apply, each approved (§8.1) |
 | `apply-terraform` | dispatch | `apply` in the order `data`, `cluster`, `addons` as `shiptrack-apply`, in the `dev` environment with approval |
+| `destroy-*` | dispatch with a confirmation | Takes down one cost-bearing resource group (§9.4) |
 | `deploy-app` | dispatch with a digest | Deploy (below) |
 | `ops-contract` | dispatch | Contract suite through a port-forward (§9.3) |
 
@@ -348,6 +350,22 @@ The platform contract suite reads `BASE_URL`, `TARGET`, `TEST_TOKEN`, and `SINGL
 - `SINGLE_STACK=1`.
 
 The suite needs no change. `ops-contract` runs it from a GitHub-hosted runner with no inbound path to the cluster (ADR-0020).
+
+### 9.4 Destroy workflows
+Every pull request that provisions a cost-bearing resource also adds its destroy workflow (ADR-0027). They stop spend one group at a time:
+
+| Workflow | Takes down |
+|---|---|
+| `destroy-addons` | Namespace, deploy RBAC, Gateway |
+| `destroy-cluster` | GKE Autopilot cluster |
+| `destroy-cloud-sql` | Cloud SQL instance, database, users |
+| `destroy-network` | VPC, subnet, router, Cloud NAT, private services access |
+| `destroy-pubsub` | Topics, subscriptions, dead-letter topics |
+| `destroy-proof-of-delivery-storage` | The proof-of-delivery bucket |
+| `destroy-secrets` | Secret Manager secrets |
+| `destroy-monitoring` | Alert policies, notification channel, dashboard |
+
+Each runs as `shiptrack-apply` in the `dev` environment with two approvals, plan then destroy. The plan lists addresses and actions only, and fails unless the `confirm` input equals the resource name. The protections (`deletion_protection`, `force_destroy`) are lowered inside the approved run and are on again for anything that remains. Remove groups in reverse order: addons, cluster, then Cloud SQL before the network. The seed root has no destroy workflow.
 
 ---
 
@@ -469,12 +487,13 @@ Cheaper options considered and rejected: a Standard zonal cluster with one Spot 
 9. Every resource carries `environment: dev` and `name: shiptrack`; the project carries both tags.
 10. The baseline monthly cost is within the range in §13, or the difference is explained in `docs/cost/analysis.md`.
 11. The runbooks (deploy and rollback, dead-letter redrive, secret rotation, state recovery) exist and are tested once.
+12. Every cost-bearing resource group has a destroy workflow (§9.4), and each was run once against its group.
 
 ---
 
 ## 16. Implementation phases
 
-Phases are applied in order; a phase's "Done when" must pass before the next starts. Terraform phases are applied by workflow after approval.
+Phases are applied in order; a phase's "Done when" must pass before the next starts. Terraform phases are applied by workflow after approval. A phase that provisions a cost-bearing resource also delivers that resource's destroy workflow (§9.4), and the phase is not done without it.
 
 | Phase | Deliverables | Done when |
 |---|---|---|

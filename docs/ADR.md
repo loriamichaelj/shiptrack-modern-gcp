@@ -30,6 +30,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0024 | `seed-by-workflow` | Accepted |
 | 0025 | `approval-on-every-workflow` | Accepted |
 | 0026 | `no-direct-push-to-dev` | Accepted |
+| 0027 | `destroy-workflow-per-cost-bearing-resource` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -319,3 +320,34 @@ A unit test asserts that the pool settings times the replica maximums in `values
 **Decision:** Protect `dev` with a branch protection rule: changes arrive only by pull request, administrators included (`enforce_admins`), with no force push, no deletion, and conversations resolved before merge. The rule requires no approving review, because the user is the only reviewer and cannot approve their own pull request, and it names no required status checks yet, because no check workflow exists. The checks are added with `--check` when `ci-checks` and `ci-terraform` exist (design §10). `terraform/seed/scripts/github-setup.sh` holds the same settings, so a re-run keeps the rule.
 
 **Consequences:** Every change, including the user's, goes through a short-lived branch and a pull request, as the parent rules already require. There is no bypass for an emergency fix; the rule has to be loosened in the GitHub settings first and restored after. Pull requests are still merged by the user, so the rule stops accidents and unreviewed pushes, not the user's own merge.
+
+## ADR-0027: destroy-workflow-per-cost-bearing-resource
+
+**Status:** Accepted
+
+**Context:** The user wants every resource that is provisioned to have a way to be taken down again, because the cost starts when a root is applied and stops only when its resources are gone. Terraform destroys by address or by root, and no `apply-` workflow can remove anything on its own. The design set protections that stop an accidental delete: `deletion_protection` on Cloud SQL and the cluster, and `prevent_destroy` on the state bucket. The parent rules have no workflow category for destroying.
+
+**Decision:** Every pull request that provisions a cost-bearing resource also adds that resource's destroy workflow. A resource group is cost-bearing when it appears in the cost table (design §13) or holds data. The groups and their workflows are:
+
+| Workflow | Takes down | Root |
+|---|---|---|
+| `destroy-addons` | Namespace, deploy RBAC, and the Gateway if enabled | addons |
+| `destroy-cluster` | GKE Autopilot cluster | cluster |
+| `destroy-cloud-sql` | Cloud SQL instance, database, and users | data |
+| `destroy-network` | VPC, subnet, router, Cloud NAT, and private services access | data |
+| `destroy-pubsub` | Topics, subscriptions, and dead-letter topics | data |
+| `destroy-proof-of-delivery-storage` | The proof-of-delivery bucket and the signer's binding on it | data |
+| `destroy-secrets` | Secret Manager secrets | data |
+| `destroy-monitoring` | Alert policies, the notification channel, and the dashboard | data |
+
+Workload IAM bindings go with the resource they bind. The seed root has no destroy workflow: the state bucket, the service accounts, and the trust are never destroyed by a workflow.
+
+The category `destroy-` joins the parent rules: Terraform destroy of one resource group, environment approval. Each workflow is thin: it names its root, its target addresses, and a confirmation value, and calls one shared script under `.github/scripts/`. It runs as `shiptrack-apply` in the `dev` environment, so no new account and no new trust exist. Its `concurrency` group is the one `apply-terraform` uses, so a destroy and an apply never touch the same state together.
+
+Each run has two jobs, both in `dev` and each needing the user's approval, as `apply-seed` does:
+1. **plan** runs `terraform plan -destroy -target=…` and prints the addresses and actions that would be destroyed, including the dependents Terraform adds to a targeted destroy, and never values. It fails unless the dispatch input `confirm` equals the workflow's resource name.
+2. **destroy** makes a fresh plan and applies it from the same job. No plan file is uploaded.
+
+The protections are lowered inside the approved run, never left off. Resources use their provider attributes (`deletion_protection`, `force_destroy`) from variables that default to protected. Before the destroy, the job applies the targeted change with the variable set to unprotected, because the provider reads the stored value on delete, then destroys. A normal apply sets the protection back for anything that remains. `prevent_destroy` is not used on resources that have a destroy workflow, because a lifecycle argument cannot be switched by a run. It stays on the state bucket, which is outside every destroy workflow.
+
+**Consequences:** Spend can be stopped one group at a time, by two approvals and a typed name, and the cluster or database can be removed without touching the rest. Destroying a group that another root depends on fails at Google, not silently: remove them in reverse order (addons, cluster, then the data groups, with Cloud SQL before the network). Destroying Cloud SQL deletes its data and its backups; its summary says so. A deleted Cloud SQL instance name cannot be reused for some time **[VERIFY]**, so the instance name carries a random suffix. A non-empty bucket is deleted only because the run sets `force_destroy`, which is why the storage workflow exists separately. `-target` is the documented tool for this and is used only here, never in `apply-terraform`. Whether `-destroy -target` with an in-run unprotect behaves as described for each resource type is checked when each workflow is first built **[VERIFY]**. The `workflows` CI job already enforces that each destroy workflow names an environment and pins its actions.
