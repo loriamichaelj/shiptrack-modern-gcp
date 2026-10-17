@@ -4,7 +4,10 @@
 # shiptrack-apply).
 # Usage: .github/scripts/terraform-ci.sh <root> plan|apply
 #
-# plan   never locks or writes state (-lock=false), so the read-only plan account can run it.
+# plan   never locks or writes state (-lock=false), so the read-only plan account can run it. A root
+#        that has never been applied has no state object, and `terraform init` would have to write
+#        an empty one, which the plan account may not do; such a root is planned against empty local
+#        state, which shows every resource as a create.
 # apply  makes a fresh plan and applies that plan in the same run; no plan file leaves the runner.
 #
 # The repository is public, so output is limited to resource addresses and actions: plan attribute
@@ -71,8 +74,22 @@ summarize() {
   fi
 }
 
+# Prints "exists" or "missing"; fails on anything else (for example access denied).
+state_object_state() {
+  local output
+  if output=$(gcloud storage objects describe "gs://${bucket}/gcp/${root}/default.tfstate" --format='value(name)' 2>&1); then
+    echo exists
+  elif grep -qE '404|does not exist|not found|NOT_FOUND' <<<"$output"; then
+    echo missing
+  else
+    echo "state check failed: $(redact <<<"$output")" >&2
+    return 1
+  fi
+}
+
 # The backend names the state bucket, so it is written here and never committed (ADR-0016).
-cat >backend.tf <<BACKEND
+write_backend() {
+  cat >backend.tf <<BACKEND
 terraform {
   backend "gcs" {
     bucket = "${bucket}"
@@ -80,6 +97,19 @@ terraform {
   }
 }
 BACKEND
+}
+
+if [[ "$mode" == apply ]]; then
+  write_backend
+else
+  state=$(state_object_state)
+  log "state of ${root}: ${state}"
+  if [[ "$state" == exists ]]; then
+    write_backend
+  else
+    log "Never applied: planning against empty local state."
+  fi
+fi
 
 quietly terraform init -input=false
 

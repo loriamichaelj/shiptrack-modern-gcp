@@ -15,6 +15,8 @@ Before the first run, give the `ci` and `dev` environments their secrets (`terra
 
 - A pull request that changes this root runs **ci-terraform** after you approve the `ci` environment. It
   plans as `shiptrack-plan`, which cannot change anything, and comments the addresses and actions.
+  Before the first apply there is no state object, and the read-only account cannot create one, so the
+  plan runs against empty state and shows every resource as a create.
 - After the merge, Actions, **apply-terraform**, root `data`, on `dev`. Approve the `dev` environment. The
   run plans again and applies that plan; the log lists addresses and actions, never values.
 - **destroy-network** takes the network down again, after two approvals and the typed name `network`.
