@@ -9,10 +9,11 @@ module can be read, linted, and planned only through the root that uses it.
 | [`network`](network) | VPC, subnet, Cloud NAT, private services access | `data` |
 | [`cloud-sql`](cloud-sql) | PostgreSQL instance, database, administrator | `data` |
 | [`secrets`](secrets) | Database credentials in Secret Manager | `data` |
+| [`pubsub`](pubsub) | Event and notification topics, subscriptions, dead letters | `data` |
+| [`proof-of-delivery-storage`](proof-of-delivery-storage) | The proof-of-delivery bucket and the signer's read access | `data` |
 
 Each module has `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf` (the provider as a constraint such
 as `~> 8.7`; the exact version is pinned in the root), and a short `README.md`.
 
-Planned, one per resource group of the destroy workflows (ADR-0027), each added in the pull request that
-builds it: `pubsub`, `proof-of-delivery-storage`, `monitoring`, and `workload-access` (one workload's IAM
-bindings, design §7.3).
+Planned, each added in the pull request that builds it: `monitoring`, and `workload-access` (one workload's IAM
+bindings, design §7.3), which the `cluster` root calls after the cluster exists (ADR-0029).

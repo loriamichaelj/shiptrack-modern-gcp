@@ -293,7 +293,7 @@ The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUM
 | Cloud Storage | One bucket named `shiptrack-proof-of-delivery-<random suffix>` in `us-central1`, Standard class, uniform access, public access prevention enforced, versioning off, soft delete at the default. Objects live under `proof-of-delivery/` (ADR-0023) |
 | Secret Manager | Secrets for the app, migrator, and admin credentials. Values are written with a write-only argument from an ephemeral random password, so they are not in state |
 | Proof-of-delivery signer | The account `shiptrack-proof-of-delivery` is created by the seed root; this root gives it `storage.objectViewer` on the bucket and lets the api principal create tokens for it |
-| Workload bindings | One `modules/workload-access` call per row of §7.3 |
+| Workload bindings | None here. One `modules/workload-access` call per row of §7.3 is made by the `cluster` root, after the cluster exists (ADR-0029) |
 | Alerts and dashboard | §11 |
 
 **Naming:** `shiptrack-` prefix for resources; globally unique names (bucket) add a `random_string` suffix. No identifier is hardcoded.
@@ -302,6 +302,8 @@ The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUM
 
 ### 8.3 `terraform/cluster`
 GKE Autopilot cluster `shiptrack` in `us-central1`: release channel `REGULAR`, private nodes, the DNS-based control-plane endpoint on and the IP-based endpoint off, no authorized networks to maintain, Workload Identity on (Autopilot default), system and workload logging, managed Prometheus collection, `deletion_protection = true`, and the labels above **[VERIFY the Terraform arguments for the DNS endpoint]**.
+
+After the cluster, this root makes the workload bindings (§7.3), one `modules/workload-access` call per row, reading resource names from the `data` root's outputs (ADR-0029).
 
 ### 8.4 `terraform/addons`
 Providers: `kubernetes`, authenticated with the apply account's short-lived token through the DNS endpoint.

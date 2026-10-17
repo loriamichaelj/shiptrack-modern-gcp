@@ -32,6 +32,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0026 | `no-direct-push-to-dev` | Accepted |
 | 0027 | `destroy-workflow-per-cost-bearing-resource` | Accepted |
 | 0028 | `finops-budget-and-cost-export` | Accepted |
+| 0029 | `workload-bindings-follow-the-cluster` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -366,8 +367,18 @@ The protections are lowered inside the approved run, never left off. Resources u
 - **A billing export.** The standard usage cost export goes to a small BigQuery dataset created in Terraform. The export itself is switched on by hand in the billing console, because it is not part of the Terraform provider **[VERIFY]**. `ops-check-cost`, a read-only workflow, queries the dataset and prints the month's cost by service and by the `name` label to its summary. `docs/cost/analysis.md` is written from it after the build (design §13).
 - **A separate root.** Both live in `terraform/finops`, not in `data`, so that taking the data groups down does not remove the budget or the cost history. It has no destroy workflow, like the seed root: a budget and a month of billing rows are not what a destroy workflow is for.
 
-Two roles on the billing account are granted by hand, once, because billing account permissions are outside the project and the seed root cannot give them: `roles/billing.costsManager` to `shiptrack-apply` (it creates the budget) and `roles/billing.viewer` to `shiptrack-plan` (it reads the budget when planning) **[VERIFY that the viewer role includes budget read]**. The seed root adds `bigquery.googleapis.com` and `billingbudgets.googleapis.com` to the enabled APIs, `roles/bigquery.admin` to the apply account for the dataset, and `roles/bigquery.jobUser` to the plan account for the queries. The dataset gives the plan account `roles/bigquery.dataViewer` on it only.
+Two roles on the billing account are granted by hand, once, because billing account permissions are outside the project and the seed root cannot give them: `roles/billing.costsManager` to `shiptrack-apply` (it creates the budget) and `roles/billing.viewer` to `shiptrack-plan` (it reads the budget when planning); the plan of the applied root confirmed that this role reads the budget. The seed root adds `bigquery.googleapis.com` and `billingbudgets.googleapis.com` to the enabled APIs, `roles/bigquery.admin` to the apply account for the dataset, and `roles/bigquery.jobUser` to the plan account for the queries. The dataset gives the plan account `roles/bigquery.dataViewer` on it only.
 
 No automatic stop. A rule that scales the cluster to zero or detaches billing when a budget is crossed needs a Pub/Sub trigger, a function, and an account that can change billing, and it can take down a demo that has to stay up. The owner gets the alert and runs the `destroy-` workflows (ADR-0027).
 
 **Consequences:** Alerts arrive after the money is spent, with up to a day of delay in the billing data. The budget and the cost history survive a full teardown. BigQuery storage for one project's rows is far under the 10 GiB free tier, and the queries are far under the free 1 TiB a month **[VERIFY]**. Two by-hand grants and one by-hand console step are the price of keeping billing permissions off the pipelines. The email address sits in the state bucket as a channel label, which only the three pipeline accounts can read.
+
+## ADR-0029: workload-bindings-follow-the-cluster
+
+**Status:** Accepted
+
+**Context:** ADR-0010 gives each workload's Kubernetes service account direct IAM roles on the single resource it uses, with no Google service account. The principal for such an account sits in the project's workload identity pool, `<PROJECT_ID>.svc.id.goog`, and Google creates that pool when the first cluster with Workload Identity is created. An IAM policy that names a principal in a pool that does not exist yet can be refused, which would fail an apply of the data root partway through **[VERIFY with the first cluster]**. The design (§8.2) listed the bindings in the data root, which is applied before the cluster.
+
+**Decision:** The data root creates the resources and no workload binding. The bindings are made by the cluster root, in `modules/workload-access`, one call per row of design §7.3, after the cluster exists. The cluster root reads the resource names from the data root's outputs through its remote state, which the plan and apply accounts can both read. The exceptions are bindings that name no workload: Pub/Sub's service agent on the dead-letter topics and subscriptions, and the signer's read access to the bucket. They stay with the resource they bind, in the data root.
+
+**Consequences:** A destroy of a data group never leaves a binding behind, because the cluster, and its bindings, come down first (ADR-0027 order: addons, cluster, then the data groups). Recreating the cluster recreates the bindings. The data root can be applied, and paid for, before the cluster exists, with nothing in it that the cluster needs to find. The cluster root now needs a read of the data root's state and permission to set IAM on topics, subscriptions, secrets, and the bucket, which the apply account has through its service admin roles (ADR-0022). If the first cluster shows that the bindings can be made before it exists, they can move into the data root without a change to the workloads.

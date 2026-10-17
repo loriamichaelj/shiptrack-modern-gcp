@@ -47,3 +47,20 @@ variable "db_credentials_version" {
   type        = number
   default     = 1
 }
+
+variable "project_number" {
+  description = "Number of the ShipTrack project. Names Pub/Sub's service agent. Sensitive so that plan output never prints it."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.project_number))
+    error_message = "project_number must be a number."
+  }
+}
+
+variable "proof_of_delivery_protection" {
+  description = "Keeps the proof-of-delivery bucket from being destroyed while it holds objects. destroy-proof-of-delivery-storage sets it to false inside its approved run (ADR-0027); every normal apply leaves it true."
+  type        = bool
+  default     = true
+}

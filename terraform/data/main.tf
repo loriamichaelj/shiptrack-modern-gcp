@@ -33,3 +33,20 @@ module "secrets" {
   passwords           = { for account, password in ephemeral.random_password.db : account => password.result }
   credentials_version = var.db_credentials_version
 }
+
+module "pubsub" {
+  source = "../modules/pubsub"
+
+  project_id     = var.project_id
+  project_number = var.project_number
+  labels         = local.labels
+}
+
+module "proof_of_delivery_storage" {
+  source = "../modules/proof-of-delivery-storage"
+
+  project_id = var.project_id
+  region     = var.region
+  labels     = local.labels
+  protection = var.proof_of_delivery_protection
+}
