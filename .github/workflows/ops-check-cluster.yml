@@ -27,11 +27,11 @@ jobs:
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
-      # kubectl gets its token from this plugin, which the runner image does not include.
-      - name: Install the GKE auth plugin
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends google-cloud-cli-gke-gcloud-auth-plugin
+      # kubectl gets its token from gke-gcloud-auth-plugin. The runner image has gcloud but not the plugin,
+      # and its package source does not carry it, so Google's setup action installs it.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
       - name: Reach the control plane through the DNS endpoint
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
