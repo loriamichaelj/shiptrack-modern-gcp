@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Plan or apply one Terraform root (data, cluster, or addons) against the state bucket the seed
+# root created. Run by ci-terraform.yml (plan, as shiptrack-plan) and apply-terraform.yml (apply, as
+# shiptrack-apply).
+# Usage: .github/scripts/terraform-ci.sh <root> plan|apply
+#
+# plan   never locks or writes state (-lock=false), so the read-only plan account can run it.
+# apply  makes a fresh plan and applies that plan in the same run; no plan file leaves the runner.
+#
+# The repository is public, so output is limited to resource addresses and actions: plan attribute
+# values are never printed, uploaded, or commented.
+#
+# Environment:
+#   GCP_PROJECT_ID       project that holds the resources (required)
+#   GCP_PROJECT_NUMBER   its number; part of the state bucket's name (required)
+#   GCP_REGION           region (default us-central1)
+#   SUMMARY_FILE         optional; the summary is also appended here, for the pull request comment
+set -euo pipefail
+
+root=${1:?usage: terraform-ci.sh <root> plan|apply}
+mode=${2:?usage: terraform-ci.sh <root> plan|apply}
+[[ "$root" =~ ^(data|cluster|addons)$ ]] || { echo "unknown root: $root" >&2; exit 2; }
+[[ "$mode" == plan || "$mode" == apply ]] || { echo "unknown mode: $mode" >&2; exit 2; }
+: "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}"
+: "${GCP_PROJECT_NUMBER:?GCP_PROJECT_NUMBER is required}"
+
+export TF_VAR_project_id=$GCP_PROJECT_ID
+export TF_VAR_project_number=$GCP_PROJECT_NUMBER
+export TF_VAR_region=${GCP_REGION:-us-central1}
+export CLOUDSDK_CORE_PROJECT=$GCP_PROJECT_ID
+export TF_IN_AUTOMATION=1 TF_INPUT=0
+
+cd "$(dirname "${BASH_SOURCE[0]}")/../../terraform/${root}"
+
+bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
+echo "::add-mask::$GCP_PROJECT_ID"
+echo "::add-mask::$GCP_PROJECT_NUMBER"
+echo "::add-mask::$bucket"
+
+log() { printf '%s\n' "$*"; }
+
+# Hide the project and its number from anything printed on a failure.
+redact() { sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER}/***/g"; }
+
+# Run a terraform command quietly; show its output (redacted) only if it fails.
+quietly() {
+  local out
+  out=$(mktemp)
+  if ! "$@" >"$out" 2>&1; then
+    redact <"$out" >&2
+    rm -f "$out"
+    return 1
+  fi
+  rm -f "$out"
+}
+
+# Print the changes in a saved plan: addresses and actions, never values.
+summarize() {
+  local plan=$1 text
+  text=$(terraform show -json "$plan" | jq -r '
+    [.resource_changes[]? | select(.change.actions != ["no-op"] and .change.actions != ["read"])] as $changes
+    | (if ($changes | length) == 0 then "No changes."
+       else ($changes | map("- `\(.change.actions | join("+"))` \(.address)") | join("\n")) end)
+      + "\n\n\($changes | length) resource change(s).\n"')
+  log "$text"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '## %s %s\n\n%s\n' "$root" "$mode" "$text" >>"$GITHUB_STEP_SUMMARY"
+  fi
+  if [[ -n "${SUMMARY_FILE:-}" ]]; then
+    printf '### %s\n\n%s\n' "$root" "$text" >>"$SUMMARY_FILE"
+  fi
+}
+
+# The backend names the state bucket, so it is written here and never committed (ADR-0016).
+cat >backend.tf <<BACKEND
+terraform {
+  backend "gcs" {
+    bucket = "${bucket}"
+    prefix = "gcp/${root}"
+  }
+}
+BACKEND
+
+quietly terraform init -input=false
+
+if [[ "$mode" == plan ]]; then
+  quietly terraform plan -input=false -lock=false -out=tfplan
+  summarize tfplan
+  exit 0
+fi
+
+quietly terraform plan -input=false -lock-timeout=120s -out=tfplan
+summarize tfplan
+quietly terraform apply -input=false -lock-timeout=120s tfplan
+log "Apply complete."

@@ -45,9 +45,14 @@ docs/
 terraform/
   seed/                 state bucket, APIs, service accounts, GitHub trust, permissions
     scripts/            ci.sh (plan and apply), github-setup.sh (environments, branch protection)
+  data/                 network, NAT, private services access (Cloud SQL, Pub/Sub, storage, and secrets follow)
 .github/workflows/
   apply-seed.yml        applies terraform/seed
   ci-checks.yml         pull request checks: terraform, secrets, workflows
+  ci-terraform.yml      pull request plan of the data, cluster, and addons roots, as a comment
+  apply-terraform.yml   applies one of those roots
+  destroy-network.yml   takes the network down
+.github/scripts/        terraform-ci.sh (plan and apply a root), terraform-destroy.sh (destroy one group)
 .checkov.yaml           checkov configuration
 .gitleaks.toml          secret scanning configuration
 .tflint.hcl             tflint configuration
@@ -62,11 +67,12 @@ in the design and are added phase by phase.
 |---|---|
 | G0 Design | Done: `docs/DESIGN.md` and `docs/ADR.md` |
 | G4 Seed | Done and applied: `apply-seed` ran twice, and the second run ended with "No changes". The state bucket, the five service accounts, and their trust exist. `dev` is protected, and the `seed` environment holds its secrets |
-| G8 Workflows | Partly: `ci-checks` and `apply-seed` are built. `ci-terraform`, `apply-terraform`, `deploy-app`, `ops-contract`, and the `destroy-` workflows are not. The `dev` and `ci` environments hold no secrets yet |
+| G8 Workflows | Partly: `ci-checks`, `apply-seed`, `ci-terraform`, `apply-terraform`, and `destroy-network` are built. `deploy-app`, `ops-contract`, and the other `destroy-` workflows are not. The `dev` and `ci` environments hold no secrets yet (`terraform/seed/README.md`, "Wiring the other workflows") |
 | G1 Application seam (in `shiptrack-modern`) | Done: `SHIPTRACK_CLOUD`, the GCP backends, and their emulator tests are merged (modern ADR-0032) |
 | G2 Chart switches (in `shiptrack-modern`) | Built and in review: `cloud`, `scaling.mode`, `spot`, the `gcp` block, and `PodMonitoring` (modern ADR-0033) |
 | G3 Image (in `shiptrack-modern`) | Not started |
-| G5 to G7 Data, cluster, and addons roots | Not started |
+| G5 Data root | In progress: the network (VPC, subnet, Cloud NAT, private services access) is built and not yet applied. Cloud SQL, Pub/Sub, the bucket, and the secrets follow |
+| G6 to G7 Cluster and addons roots | Not started |
 | G9 to G11 Application, validation, operations | Not started |
 
 Decisions still waiting on the user are the entries marked Planned in [`docs/ADR.md`](docs/ADR.md),
