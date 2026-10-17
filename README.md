@@ -27,7 +27,7 @@ the application is unchanged, and each concern moves to the matching managed GCP
 | Observability | Managed Service for Prometheus, Cloud Logging, Cloud Monitoring |
 
 There is no public ingress by default (a demo runs through `kubectl port-forward`), and cost is a design
-constraint: about $25 to $35 a month for the baseline, watched by a $50 budget with alerts.
+constraint: about $25 to $35 a month for the baseline, watched by a $75 budget with alerts.
 
 ## How changes reach GCP
 
@@ -49,7 +49,7 @@ export), which is separate so that taking the others down keeps the cost history
 | `terraform/addons/` | The `shiptrack` namespace and the deploy account's role in it |
 | `terraform/finops/` | The monthly budget with alerts, and the dataset for the billing export |
 | `deploy/` | The Helm values, the pinned chart commit, and the db-init Job |
-| `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, gke-autopilot, workload-access |
+| `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, ui-ingress, gke-autopilot, workload-access |
 | `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, `ops-contract`, `ops-check-cluster`, and `ops-check-cost` |
 | `scripts/` | The chart arguments, the connection budget check, the rollout sampler, and the contract run through a port-forward |
 | `.github/scripts/` | The plan, apply, and destroy wrappers, which print addresses and actions only, and the cost report |

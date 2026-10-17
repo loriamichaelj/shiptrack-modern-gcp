@@ -57,7 +57,7 @@
 | Event bus | EventBridge bus, rule, archive | Service Bus topic with a filter | Pub/Sub topic with a filtered subscription and 7-day retention for replay |
 | Proof-of-delivery storage | S3, presigned GET | Blob, SAS URL | Cloud Storage, V4 signed URL through the IAM signing API (ADR-0011) |
 | Queue-based scaling | KEDA `aws-sqs-queue` | KEDA `azure-servicebus` | Fixed replica counts, no KEDA (ADR-0012) |
-| Ingress | ALB with TargetGroupBinding | Gateway API | None by default; optional regional external Application Load Balancer through Gateway API (ADR-0013) |
+| Ingress | ALB with TargetGroupBinding | Gateway API | A regional external Application Load Balancer through Gateway API, plain HTTP on its address, behind a Cloud Armor policy that admits one address (ADR-0031). Without it, `kubectl port-forward` (ADR-0013) |
 | Metrics, logs | AMP, CloudWatch | In-cluster, to be decided | Managed Service for Prometheus, Cloud Logging, Cloud Monitoring (ADR-0014) |
 | Terraform state | S3 | Blob | Cloud Storage bucket with native locking, created by the seed workflow (ADR-0016, ADR-0024) |
 | Workload identity | IAM role per service account | Managed identity per service account | IAM principal per Kubernetes service account, no Google service account except the signer |
@@ -309,7 +309,7 @@ After the cluster, this root makes the workload bindings (§7.3), one `modules/w
 Providers: `kubernetes`, authenticated with the apply account's short-lived token through the DNS endpoint.
 - Namespace `shiptrack` with the labels of §7.1.
 - A `Role` and `RoleBinding` that give the `shiptrack-deploy` account the workload kinds, `Job`/`CronJob`, `NetworkPolicy`, `PodMonitoring`, `pods/portforward`, and Secrets (Helm release storage) in that namespace only.
-- The `Gateway` and its policies, only when `gateway_enabled` is true (ADR-0013).
+- The `Gateway` and its policies are not here: they are applied by `deploy-app` from `deploy/gateway` (ADR-0031). This root gives the deploy account the right to manage them in the namespace.
 
 ### 8.5 Applying
 `apply-terraform` runs the roots in order, each after its own approval. The agent prepares the code and runs `fmt`, `validate`, `tflint`, and `checkov`. Before each approval, the agent states what the pull request's plan will create, change, or destroy.
@@ -444,12 +444,13 @@ All figures are approximate monthly costs in `us-central1`, **[VERIFY against Go
 | Logging and Monitoring | Logging within the free allotment; Managed Prometheus samples; a few alert conditions | $2 to $5 |
 | State bucket | A few small objects | ≈ $0 |
 | **Baseline total** | | **about $25 to $35** |
-| Optional regional external load balancer | One forwarding rule at $0.025 per hour | + about $18 |
-| Optional Cloud Armor allow-list | One policy and rule | + about $6 |
+| Regional external Application Load Balancer for the UI (ADR-0031) | One HTTP forwarding rule at $0.025 per hour; the reserved address is free while it is in use | + about $18 |
+| Cloud Armor allow-list for the UI | One policy, two rules, and requests | + about $6 |
+| **Total with the UI URL** | | **about $50 to $60** |
 
 `docs/cost/analysis.md` records the real monthly cost from the billing export, grouped by label, and cost per 1M requests at the load profile used for AWS. It reports honestly if GCP costs more at this scale.
 
-**FinOps (ADR-0028).** A $50 monthly budget on the project alerts at 50%, 90%, and 100% of actual spend and at 100% of forecast, by email, and never stops anything. The standard usage cost export goes to a BigQuery dataset, and `ops-check-cost` prints the month's cost by service and by label. Both are in `terraform/finops`, which no destroy workflow removes.
+**FinOps (ADR-0028).** A $75 monthly budget on the project alerts at 50%, 90%, and 100% of actual spend and at 100% of forecast, by email, and never stops anything. The standard usage cost export goes to a BigQuery dataset, and `ops-check-cost` prints the month's cost by service and by label. Both are in `terraform/finops`, which no destroy workflow removes.
 
 Cheaper options considered and rejected: a Standard zonal cluster with one Spot node (ADR-0005), Postgres inside the cluster (ADR-0008), public node addresses instead of NAT (ADR-0007).
 

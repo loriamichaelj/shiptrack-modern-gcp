@@ -50,3 +50,11 @@ module "proof_of_delivery_storage" {
   labels     = local.labels
   protection = var.proof_of_delivery_protection
 }
+
+module "ui_ingress" {
+  source = "../modules/ui-ingress"
+
+  project_id = var.project_id
+  region     = var.region
+  network_id = module.network.network_id
+}

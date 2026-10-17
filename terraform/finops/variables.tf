@@ -36,5 +36,5 @@ variable "alert_email" {
 variable "monthly_budget_usd" {
   description = "Monthly budget in US dollars (ADR-0028): about 1.5 times the baseline in design section 13."
   type        = number
-  default     = 50
+  default     = 75
 }

@@ -1,4 +1,4 @@
-# A budget of $50 a month (ADR-0028) that alerts and never stops anything. Credits count, so the GKE
+# A budget of $75 a month (ADR-0028, raised from $50 by ADR-0031) that alerts and never stops anything. Credits count, so the GKE
 # free-tier credit lowers the spend the budget sees. Alerts go to the email channel below and, because
 # default recipients are not disabled, to the billing account's administrators and users.
 

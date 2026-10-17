@@ -12,6 +12,7 @@ module can be read, linted, and planned only through the root that uses it.
 | [`pubsub`](pubsub) | Event and notification topics, subscriptions, dead letters | `data` |
 | [`proof-of-delivery-storage`](proof-of-delivery-storage) | The proof-of-delivery bucket and the signer's read access | `data` |
 | [`gke-autopilot`](gke-autopilot) | The GKE Autopilot cluster | `cluster` |
+| [`ui-ingress`](ui-ingress) | The proxy-only subnet, the reserved address, and the Cloud Armor policy for the UI's load balancer | `data` |
 | [`workload-access`](workload-access) | One workload's IAM bindings on the resources it uses | `cluster` |
 
 Each module has `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf` (the provider as a constraint such
