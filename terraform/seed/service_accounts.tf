@@ -1,7 +1,7 @@
 # Every service account the pipelines and the cluster use. They are created here, once, so that the
 # apply account never needs to create service accounts or grant itself roles.
 #
-#   plan                pull requests: reads the project and the state
+#   plan                pull request checks (environment ci): reads the project and the state
 #   apply               Terraform applies for data, cluster, and addons (environment dev)
 #   deploy              Helm deploys and the contract run (environment dev)
 #   gke-node            identity of the GKE nodes
@@ -9,7 +9,7 @@
 
 locals {
   service_accounts = {
-    plan              = "ShipTrack Terraform plan (pull requests, read-only)"
+    plan              = "ShipTrack Terraform plan (environment ci, read-only)"
     apply             = "ShipTrack Terraform apply (environment dev)"
     deploy            = "ShipTrack Helm deploy (environment dev)"
     gke-node          = "ShipTrack GKE node identity"

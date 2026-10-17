@@ -3,9 +3,11 @@
 # repository, so the two approve and protect alike). Run by a human with admin rights; needs an
 # authenticated `gh`. Safe to re-run.
 #
-#   - environment `dev` (and `seed` with --seed-env): you are the required reviewer,
-#     and only the `dev` branch may deploy to it
-#   - branch protection on `dev`: changes arrive by pull request
+#   - environments `dev`, `ci`, and (with --seed-env) `seed`: you are the required reviewer.
+#     Only the `dev` branch may deploy to `dev` and `seed`; `ci` runs pull request checks, so
+#     it has approval and no branch rule
+#   - branch protection on `dev`: no direct push, for administrators too; changes arrive by pull
+#     request, with no force push or deletion
 #   - Actions: read-only default token, approval required for every outside contributor
 #   - secret scanning and push protection on
 #
@@ -47,20 +49,26 @@ api() { # api <method> <path> <json-body>
 
 user_id=$(gh api user --jq .id)
 
-setup_environment() {
-  local name=$1
-  api PUT "repos/$repo/environments/$name" "$(jq -nc --argjson id "$user_id" '{
+setup_environment() { # setup_environment <name> <only-dev-branch: true|false>
+  local name=$1 branch_rule=$2 policy=null
+  $branch_rule && policy='{"protected_branches":false,"custom_branch_policies":true}'
+  api PUT "repos/$repo/environments/$name" "$(jq -nc --argjson id "$user_id" --argjson policy "$policy" '{
     wait_timer: 0,
     prevent_self_review: false,
     reviewers: [{type: "User", id: $id}],
-    deployment_branch_policy: {protected_branches: false, custom_branch_policies: true}
+    deployment_branch_policy: $policy
   }')"
-  api POST "repos/$repo/environments/$name/deployment-branch-policies" \
-    "$(jq -nc --arg b "$branch" '{name: $b, type: "branch"}')"
+  if $branch_rule; then
+    api POST "repos/$repo/environments/$name/deployment-branch-policies" \
+      "$(jq -nc --arg b "$branch" '{name: $b, type: "branch"}')"
+  fi
 }
 
-setup_environment dev
-$seed_env && setup_environment seed
+setup_environment dev true
+# Pull request checks run in `ci`. A pull request run uses a pull request ref, not `dev`, so this
+# environment has approval but no branch rule (ADR-0025).
+setup_environment ci false
+$seed_env && setup_environment seed true
 
 if [[ ${#checks[@]} -gt 0 ]]; then
   status_checks=$(printf '%s\n' "${checks[@]}" | jq -R . | jq -sc '{strict: false, contexts: .}')
@@ -69,7 +77,7 @@ else
 fi
 api PUT "repos/$repo/branches/$branch/protection" "$(jq -nc --argjson checks "$status_checks" '{
   required_status_checks: $checks,
-  enforce_admins: false,
+  enforce_admins: true,
   required_pull_request_reviews: {required_approving_review_count: 0, dismiss_stale_reviews: true},
   restrictions: null,
   allow_force_pushes: false,
