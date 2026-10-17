@@ -1,6 +1,6 @@
 name: ci-terraform
 
-# Plans the data, cluster, and addons roots on a pull request as the read-only plan account and
+# Plans the data, cluster, addons, and finops roots on a pull request as the read-only plan account and
 # comments the addresses and actions on the pull request. It never locks or writes state, never
 # uploads a plan, and never prints an attribute value: the repository is public.
 # The job runs in the `ci` environment, so the owner approves the run first (ADR-0025).
@@ -11,6 +11,7 @@ on:
       - "terraform/data/**"
       - "terraform/cluster/**"
       - "terraform/addons/**"
+      - "terraform/finops/**"
       - "terraform/modules/**"
       - ".github/scripts/terraform-ci.sh"
       - ".github/workflows/ci-terraform.yml"
@@ -52,11 +53,13 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_BILLING_ACCOUNT_ID: ${{ secrets.GCP_BILLING_ACCOUNT_ID }}
+          GCP_ALERT_EMAIL: ${{ secrets.GCP_ALERT_EMAIL }}
           SUMMARY_FILE: ${{ runner.temp }}/comment.md
         run: |
           printf '## Terraform plan\n\nAddresses and actions only; no values. Run by the read-only plan account.\n\n' >"$SUMMARY_FILE"
           failed=0
-          for root in data cluster addons; do
+          for root in data cluster addons finops; do
             [[ -f "terraform/${root}/versions.tf" ]] || continue
             if ! .github/scripts/terraform-ci.sh "$root" plan; then
               printf '### %s\n\nThe plan failed. See the run log.\n\n' "$root" >>"$SUMMARY_FILE"
