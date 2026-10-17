@@ -4,7 +4,9 @@
 # shiptrack-apply).
 # Usage: .github/scripts/terraform-ci.sh <root> plan|apply
 #
-# plan   never locks or writes state (-lock=false), so the read-only plan account can run it. A root
+# plan   never locks or writes state (-lock=false), so the read-only plan account can run it. The
+#        addons root is planned with -refresh=false: refreshing its Kubernetes objects needs the
+#        cluster's RBAC, which the plan account does not have. A root
 #        that has never been applied has no state object, and `terraform init` would have to write
 #        an empty one, which the plan account may not do; such a root is planned against empty local
 #        state, which shows every resource as a create.
@@ -130,7 +132,9 @@ fi
 quietly terraform init -input=false
 
 if [[ "$mode" == plan ]]; then
-  quietly terraform plan -input=false -lock=false -out=tfplan
+  plan_flags=()
+  [[ "$root" == addons ]] && plan_flags+=(-refresh=false)
+  quietly terraform plan -input=false -lock=false ${plan_flags[@]+"${plan_flags[@]}"} -out=tfplan
   summarize tfplan
   exit 0
 fi
