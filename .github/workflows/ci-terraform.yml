@@ -65,9 +65,11 @@ jobs:
           done
           exit "$failed"
       - name: Comment on the pull request
-        if: always() && hashFiles(format('{0}/comment.md', runner.temp)) != ''
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           COMMENT: ${{ runner.temp }}/comment.md
-        run: gh pr comment "$PR" --body-file "$COMMENT" --edit-last --create-if-none
+        run: |
+          [[ -s "$COMMENT" ]] || { echo "No plan was written; nothing to comment."; exit 0; }
+          gh pr comment "$PR" --body-file "$COMMENT" --edit-last --create-if-none
