@@ -44,7 +44,11 @@ export TF_VAR_region=${GCP_REGION:-us-central1}
 export CLOUDSDK_CORE_PROJECT=$GCP_PROJECT_ID
 export TF_IN_AUTOMATION=1 TF_INPUT=0
 
-cd "$(dirname "${BASH_SOURCE[0]}")/../../terraform/${root}"
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=redact.sh
+source "$here/redact.sh"
+
+cd "$here/../../terraform/${root}"
 
 bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
 echo "::add-mask::$GCP_PROJECT_ID"
@@ -53,13 +57,11 @@ echo "::add-mask::$bucket"
 
 log() { printf '%s\n' "$*"; }
 
-redact() { sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER}/***/g"; }
-
 quietly() {
   local out
   out=$(mktemp)
   if ! "$@" >"$out" 2>&1; then
-    redact <"$out" >&2
+    print_failure "$out"
     rm -f "$out"
     return 1
   fi
@@ -102,12 +104,12 @@ quietly terraform init -input=false
 
 if [[ "$mode" == destroy && ${#unprotect[@]} -gt 0 ]]; then
   log "Lowering the protection (${UNPROTECT_VAR}) on the targets."
-  quietly terraform plan -input=false -lock-timeout=120s "${targets[@]}" "${unprotect[@]}" -out=unprotect.tfplan
+  quietly terraform plan -input=false -lock-timeout=120s "${targets[@]}" ${unprotect[@]+"${unprotect[@]}"} -out=unprotect.tfplan
   summarize unprotect.tfplan "lower the protection"
   quietly terraform apply -input=false -lock-timeout=120s unprotect.tfplan
 fi
 
-quietly terraform plan -destroy -input=false -lock-timeout=120s "${targets[@]}" "${unprotect[@]}" -out=tfplan
+quietly terraform plan -destroy -input=false -lock-timeout=120s "${targets[@]}" ${unprotect[@]+"${unprotect[@]}"} -out=tfplan
 summarize tfplan "destroy"
 
 if [[ "$mode" == destroy ]]; then

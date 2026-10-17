@@ -42,7 +42,8 @@ export TF_VAR_workload_identity_pool_id=${GCP_WORKLOAD_IDENTITY_POOL:-github}
 export CLOUDSDK_CORE_PROJECT=$GCP_PROJECT_ID
 export TF_IN_AUTOMATION=1 TF_INPUT=0
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$here/.."
 
 bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
 state_prefix="gcp/seed"
@@ -54,8 +55,9 @@ echo "::add-mask::$bucket"
 
 log() { printf '%s\n' "$*"; }
 
-# Hide the project and its number from anything printed on a failure.
-redact() { sed -e "s/${GCP_PROJECT_ID}/***/g" -e "s/${GCP_PROJECT_NUMBER}/***/g"; }
+# Identifiers are hidden from anything printed on a failure, even when a tool splits one across lines.
+# shellcheck source-path=SCRIPTDIR/../../../.github/scripts source=redact.sh
+source "$here/../../../.github/scripts/redact.sh"
 
 # Prints "exists" or "missing"; fails on anything else (for example access denied).
 bucket_state() {
@@ -65,7 +67,12 @@ bucket_state() {
   elif grep -qE '404|does not exist|NOT_FOUND' <<<"$output"; then
     echo missing
   else
-    echo "bucket check failed: $(redact <<<"$output")" >&2
+    local failure
+    failure=$(mktemp)
+    printf '%s\n' "$output" >"$failure"
+    echo "bucket check failed:" >&2
+    print_failure "$failure"
+    rm -f "$failure"
     return 1
   fi
 }
@@ -86,7 +93,7 @@ quietly() {
   local out
   out=$(mktemp)
   if ! "$@" >"$out" 2>&1; then
-    redact <"$out" >&2
+    print_failure "$out"
     rm -f "$out"
     return 1
   fi
