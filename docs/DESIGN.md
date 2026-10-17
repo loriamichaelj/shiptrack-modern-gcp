@@ -109,7 +109,7 @@ shiptrack-modern-gcp/
 │   ├── data/                          # network, NAT, Cloud SQL, Pub/Sub, bucket, Secret Manager, workload IAM, alerts
 │   ├── cluster/                       # GKE Autopilot
 │   ├── addons/                        # namespace, deployer RBAC, optional Gateway
-│   └── modules/workload-access/       # one workload's IAM bindings
+│   └── modules/                       # network, then one per resource group of the destroy workflows (ADR-0027), and workload-access (one workload's IAM bindings)
 ├── deploy/
 │   ├── values-gcp.yaml                # non-identifying Helm values for cloud=gcp
 │   ├── chart-ref                      # pinned shiptrack-modern commit SHA

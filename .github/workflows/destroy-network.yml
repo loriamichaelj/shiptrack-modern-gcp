@@ -23,14 +23,8 @@ concurrency:
 
 env:
   TF_VERSION: "1.16.4"
-  # The resources of this group, in the data root.
-  TARGETS: >-
-    google_service_networking_connection.private_services
-    google_compute_global_address.private_services
-    google_compute_router_nat.this
-    google_compute_router.this
-    google_compute_subnetwork.this
-    google_compute_network.this
+  # The group is one module of the data root.
+  TARGETS: module.network
 
 jobs:
   plan:
