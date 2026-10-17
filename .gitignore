@@ -10,7 +10,7 @@ override.tf.json
 *.auto.tfvars
 *.tfvars
 
-# Written by terraform/bootstrap/scripts/ci.sh at run time; names the state bucket
+# Written by terraform/seed/scripts/ci.sh at run time; names the state bucket
 backend.tf
 
 # Local environment and editor files

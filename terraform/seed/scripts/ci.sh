@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Plan or apply the bootstrap configuration. Run by .github/workflows/apply-bootstrap.yml.
-# Usage: terraform/bootstrap/scripts/ci.sh plan|apply
+# Plan or apply the seed configuration. Run by .github/workflows/apply-seed.yml.
+# Usage: terraform/seed/scripts/ci.sh plan|apply
 #
 # State lives in the bucket this configuration creates, so the first run is special:
 #   1. create only the state bucket, with local state,
@@ -45,7 +45,7 @@ export TF_IN_AUTOMATION=1 TF_INPUT=0
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
-state_prefix="gcp/bootstrap"
+state_prefix="gcp/seed"
 state_object="${state_prefix}/default.tfstate"
 
 echo "::add-mask::$GCP_PROJECT_ID"
@@ -103,7 +103,7 @@ summarize() {
       + "\n\n\($changes | length) resource change(s).\n"')
   log "$text"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    printf '## Bootstrap %s\n\n%s\n' "$mode" "$text" >>"$GITHUB_STEP_SUMMARY"
+    printf '## Seed %s\n\n%s\n' "$mode" "$text" >>"$GITHUB_STEP_SUMMARY"
   fi
 }
 

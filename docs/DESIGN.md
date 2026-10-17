@@ -30,7 +30,7 @@
 |---|---|
 | Same application, three clouds | The image running on GCP is the byte-identical digest that runs on AWS and Azure |
 | Contract parity | The platform contract `full` suite passes against the GCP deployment (`TARGET=modern`) |
-| Declarative delivery | Everything after the by-hand bootstrap (§8.0) is created by a workflow after an approval; no manual `kubectl`, `helm`, or console steps |
+| Declarative delivery | Everything after the by-hand seed (§8.0) is created by a workflow after an approval; no manual `kubectl`, `helm`, or console steps |
 | No stored credentials | No service account key anywhere; no secret in git, in Kubernetes Secrets, or on disk; values are read from Secret Manager at runtime (§12) |
 | Zero-loss events | 0 lost events across a deploy and a Spot preemption, shown by the simulator ledger |
 | Lowest cost | About $25 to $35 a month with no public address (§13), and cost per 1M requests at the same load profile **[VERIFY]** |
@@ -59,7 +59,7 @@
 | Queue-based scaling | KEDA `aws-sqs-queue` | KEDA `azure-servicebus` | Fixed replica counts, no KEDA (ADR-0012) |
 | Ingress | ALB with TargetGroupBinding | Gateway API | None by default; optional regional external Application Load Balancer through Gateway API (ADR-0013) |
 | Metrics, logs | AMP, CloudWatch | In-cluster, to be decided | Managed Service for Prometheus, Cloud Logging, Cloud Monitoring (ADR-0014) |
-| Terraform state | S3 | Blob | Cloud Storage bucket with native locking, created by the bootstrap workflow (ADR-0016, ADR-0024) |
+| Terraform state | S3 | Blob | Cloud Storage bucket with native locking, created by the seed workflow (ADR-0016, ADR-0024) |
 | Workload identity | IAM role per service account | Managed identity per service account | IAM principal per Kubernetes service account, no Google service account except the signer |
 | CI to cloud | GitHub OIDC | None | GitHub OIDC with Workload Identity Federation, service account impersonation |
 
@@ -86,7 +86,7 @@
                                                                │ Cloud SQL ◄┘         subscription notify│
                                                                │ (private IP)            │              │
                                                                │ sla-scan (CronJob */5)  worker-notify  │
-                                                               │ db-bootstrap · migrate (Jobs)          │
+                                                               │ db-init · migrate (Jobs)          │
                                                                └──────────────┬───────────────────────┘
         egress to GHCR, GitHub, Google APIs via Cloud NAT                      │
         workload principals ──► Secret Manager (DB credentials)  ◄─────────────┘
@@ -104,7 +104,7 @@ shiptrack-modern-gcp/
 │   ├── DESIGN.md  ADR.md
 │   └── runbooks/                      # written after the build, not before
 ├── terraform/
-│   ├── bootstrap/                     # state bucket, APIs, service accounts, GitHub trust, permissions (README: one-time setup)
+│   ├── seed/                     # state bucket, APIs, service accounts, GitHub trust, permissions (README: one-time setup)
 │   │   └── scripts/                   # ci.sh (plan/apply, first-run bucket seeding), github-setup.sh
 │   ├── data/                          # network, NAT, Cloud SQL, Pub/Sub, bucket, Secret Manager, workload IAM, alerts
 │   ├── cluster/                       # GKE Autopilot
@@ -113,17 +113,17 @@ shiptrack-modern-gcp/
 ├── deploy/
 │   ├── values-gcp.yaml                # non-identifying Helm values for cloud=gcp
 │   ├── chart-ref                      # pinned shiptrack-modern commit SHA
-│   └── db-bootstrap/                  # Job manifest and bootstrap.sql (schema, roles, grants)
+│   └── db-init/                  # Job manifest and init.sql (schema, roles, grants)
 ├── scripts/                           # render checks, local helpers
 ├── .github/
-│   ├── workflows/                     # apply-bootstrap, ci-checks, ci-terraform, apply-terraform, deploy-app, ops-contract
+│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, deploy-app, ops-contract
 │   ├── scripts/terraform-ci.sh        # plan/apply wrapper for data, cluster, and addons that masks identifiers
 │   └── dependabot.yml                 # github-actions, terraform
 ├── .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
 └── README.md
 ```
 
-**Four Terraform roots**, applied in this order: `bootstrap`, `data`, `cluster`, `addons`. The `kubernetes` provider cannot be configured reliably from a cluster created in the same apply, so `addons` follows `cluster`. State objects: `gcp/<root>/default.tfstate` in the state bucket (ADR-0016).
+**Four Terraform roots**, applied in this order: `seed`, `data`, `cluster`, `addons`. The `kubernetes` provider cannot be configured reliably from a cluster created in the same apply, so `addons` follows `cluster`. State objects: `gcp/<root>/default.tfstate` in the state bucket (ADR-0016).
 
 ---
 
@@ -220,7 +220,7 @@ All workloads use Spot pods (ADR-0005). The totals drive the cost in §13.
 | worker-notify | Deployment | 1 | 50m, 128Mi | 256Mi |
 | sla-scan | CronJob `*/5 * * * *`, `concurrencyPolicy: Forbid`, active | — | 100m, 128Mi | 256Mi |
 | migrate | Job (Helm hook), enabled, because this environment owns its schema (ADR-0019) | — | 100m, 128Mi | 256Mi |
-| db-bootstrap | Job run by `deploy-app` before the release (§8.1) | — | 100m, 128Mi | 256Mi |
+| db-init | Job run by `deploy-app` before the release (§8.1) | — | 100m, 128Mi | 256Mi |
 
 Autopilot bills requests and rounds them up to its own minimums and ratios **[VERIFY the rounding for the smallest pods]**. There are no CPU limits, as in modern §7.2. The pod security context, probes, topology spread, PDBs, and `emptyDir` `/tmp` are those of modern §7.2. The two api replicas keep the zero-downtime termination settings (REM-12) without the load balancer parts.
 
@@ -235,7 +235,7 @@ Autopilot bills requests and rounds them up to its own minimums and ratios **[VE
 | `shiptrack-worker-notify` | `pubsub.subscriber` on the notification subscription |
 | `shiptrack-sla-scan` | `secretmanager.secretAccessor` on the app secret |
 | `shiptrack-migrate` | `secretmanager.secretAccessor` on the migrator secret |
-| `shiptrack-db-bootstrap` | `secretmanager.secretAccessor` on the admin secret |
+| `shiptrack-db-init` | `secretmanager.secretAccessor` on the admin secret |
 
 Each binding is on the single resource, never on the project. The principal is the Kubernetes service account named in the namespace `shiptrack`. The signer service account has `storage.objectViewer` on the bucket and nothing else, so a signed URL can only read.
 
@@ -252,20 +252,20 @@ Each binding is on the single resource, never on the project. The principal is t
 
 ## 8. Infrastructure (Terraform)
 
-Provider `google`, pinned to an exact version, and Terraform 1.11 or later for write-only arguments **[VERIFY the provider major and the minimum version for each write-only argument]**. The backend is `gcs`. The bootstrap workflow creates the state bucket and writes a gitignored `backend.tf` that names it, so no committed file does (ADR-0016). The project is `TF_VAR_project_id`, from a masked secret. Every resource that takes labels gets `environment = "dev"` and `name = "shiptrack"` from one `local.labels` map, or from provider-level default labels if the pinned provider supports them **[VERIFY]**.
+Provider `google`, pinned to an exact version, and Terraform 1.11 or later for write-only arguments **[VERIFY the provider major and the minimum version for each write-only argument]**. The backend is `gcs`. The seed workflow creates the state bucket and writes a gitignored `backend.tf` that names it, so no committed file does (ADR-0016). The project is `TF_VAR_project_id`, from a masked secret. Every resource that takes labels gets `environment = "dev"` and `name = "shiptrack"` from one `local.labels` map, or from provider-level default labels if the pinned provider supports them **[VERIFY]**.
 
-### 8.0 Bootstrap by hand
-The user creates these once, because the first run needs them to exist. The commands are in `terraform/bootstrap/README.md`.
+### 8.0 Seed by hand
+The user creates these once, because the first run needs them to exist. The commands are in `terraform/seed/README.md`.
 1. The repository `shiptrack-modern-gcp` with `dev` as its default branch, and its numeric ID and its owner's numeric ID. The repository must issue OIDC tokens with the immutable subject `repo:<owner>@<owner id>/<repo>@<repo id>`, which the README checks.
 2. The five APIs the federation needs: IAM, IAM Credentials, Security Token Service, Resource Manager, and Service Usage.
 3. A Workload Identity pool and an OIDC provider for `https://token.actions.githubusercontent.com`. The subject is the token's `sub` claim. The attribute condition matches the numeric repository ID and the numeric owner ID, so a renamed or transferred repository, or any other repository, cannot authenticate.
-4. The seed service account `shiptrack-seed`, with the roles bootstrap needs, and one trust binding: only the subject `…:environment:bootstrap` can impersonate it.
-5. The GitHub environments `bootstrap` and `dev` (the user as required reviewer, `dev` the only branch allowed to deploy), branch protection, and the secrets the workflows read, from `terraform/bootstrap/scripts/github-setup.sh` and the README.
+4. The seed service account `shiptrack-seed`, with the roles the seed root needs, and one trust binding: only the subject `…:environment:seed` can impersonate it.
+5. The GitHub environments `seed` and `dev` (the user as required reviewer, `dev` the only branch allowed to deploy), branch protection, and the secrets the workflows read, from `terraform/seed/scripts/github-setup.sh` and the README.
 
 The state bucket, the other service accounts, their trust, and their permissions are not by hand: the workflow creates them (§8.1).
 
-### 8.1 `terraform/bootstrap`
-Applied by the `apply-bootstrap` workflow as the seed service account. Both its jobs run in the `bootstrap` environment: the user approves the first to read the plan summary, which lists addresses and actions only, then approves the second to apply. On the first run `scripts/ci.sh` creates only the state bucket with local state, writes `backend.tf`, and migrates the state into the bucket before creating anything else (ADR-0024).
+### 8.1 `terraform/seed`
+Applied by the `apply-seed` workflow as the seed service account. Both its jobs run in the `seed` environment: the user approves the first to read the plan summary, which lists addresses and actions only, then approves the second to apply. On the first run `scripts/ci.sh` creates only the state bucket with local state, writes `backend.tf`, and migrates the state into the bucket before creating anything else (ADR-0024).
 
 | Resource | Notes |
 |---|---|
@@ -278,7 +278,7 @@ Applied by the `apply-bootstrap` workflow as the seed service account. Both its 
 | Deploy roles | `container.clusterViewer` to fetch credentials through the DNS endpoint, and `serviceusage.serviceUsageConsumer`. All cluster permissions are Kubernetes RBAC in one namespace (§8.4) |
 | Node role | `container.defaultNodeServiceAccount` for `shiptrack-gke-node` |
 
-The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, and `GCP_SEED_SERVICE_ACCOUNT` (in the `bootstrap` environment), and the variable `GCP_REGION`. The owner and repository names and IDs come from the workflow context.
+The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUMBER`, `GCP_WORKLOAD_IDENTITY_PROVIDER`, and `GCP_SEED_SERVICE_ACCOUNT` (in the `seed` environment), and the variable `GCP_REGION`. The owner and repository names and IDs come from the workflow context.
 
 ### 8.2 `terraform/data`
 
@@ -291,13 +291,13 @@ The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUM
 | Pub/Sub | Topic `shiptrack-carrier-events` with a pull subscription (ack deadline 60 s, retention 4 d, dead-letter after 5 attempts) and a dead-letter topic with a pull subscription (retention 14 d). Topic `shiptrack-notifications` (retention 7 d) with a subscription filtered on `detail_type`, with the same dead-letter setup. The Pub/Sub service agent gets publisher on each dead-letter topic and subscriber on each source subscription |
 | Cloud Storage | One bucket named `shiptrack-proof-of-delivery-<random suffix>` in `us-central1`, Standard class, uniform access, public access prevention enforced, versioning off, soft delete at the default. Objects live under `proof-of-delivery/` (ADR-0023) |
 | Secret Manager | Secrets for the app, migrator, and admin credentials. Values are written with a write-only argument from an ephemeral random password, so they are not in state |
-| Proof-of-delivery signer | The account `shiptrack-proof-of-delivery` is created by bootstrap; this root gives it `storage.objectViewer` on the bucket and lets the api principal create tokens for it |
+| Proof-of-delivery signer | The account `shiptrack-proof-of-delivery` is created by the seed root; this root gives it `storage.objectViewer` on the bucket and lets the api principal create tokens for it |
 | Workload bindings | One `modules/workload-access` call per row of §7.3 |
 | Alerts and dashboard | §11 |
 
 **Naming:** `shiptrack-` prefix for resources; globally unique names (bucket) add a `random_string` suffix. No identifier is hardcoded.
 
-**db-bootstrap:** `deploy/db-bootstrap/bootstrap.sql` creates the schema, the `shiptrack_app` and `shiptrack_migrator` roles, and their grants, as the Azure variant does. `deploy-app` runs it as a Job before the release, with the admin secret, and it is idempotent.
+**db-init:** `deploy/db-init/init.sql` creates the schema, the `shiptrack_app` and `shiptrack_migrator` roles, and their grants, as the Azure variant does. `deploy-app` runs it as a Job before the release, with the admin secret, and it is idempotent.
 
 ### 8.3 `terraform/cluster`
 GKE Autopilot cluster `shiptrack` in `us-central1`: release channel `REGULAR`, private nodes, the DNS-based control-plane endpoint on and the IP-based endpoint off, no authorized networks to maintain, Workload Identity on (Autopilot default), system and workload logging, managed Prometheus collection, `deletion_protection = true`, and the labels above **[VERIFY the Terraform arguments for the DNS endpoint]**.
@@ -325,8 +325,8 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | Workflow | Trigger | Does |
 |---|---|---|
 | `ci-checks` | pull request | Static checks (§10) |
-| `ci-terraform` | pull request | `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `bootstrap` is planned only by `apply-bootstrap`, because the first run precedes the plan account |
-| `apply-bootstrap` | dispatch | Applies `terraform/bootstrap` as the seed account: two jobs in the `bootstrap` environment, plan then apply, each approved (§8.1) |
+| `ci-terraform` | pull request | `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
+| `apply-seed` | dispatch | Applies `terraform/seed` as the seed account: two jobs in the `seed` environment, plan then apply, each approved (§8.1) |
 | `apply-terraform` | dispatch | `apply` in the order `data`, `cluster`, `addons` as `shiptrack-apply`, in the `dev` environment with approval |
 | `deploy-app` | dispatch with a digest | Deploy (below) |
 | `ops-contract` | dispatch | Contract suite through a port-forward (§9.3) |
@@ -335,7 +335,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 1. `environment: dev` (the user approves); `concurrency: deploy-dev` without cancel.
 2. Authenticate as `shiptrack-deploy`; fetch credentials through the DNS endpoint on the runner only.
 3. Check out `shiptrack-modern` at the commit in `deploy/chart-ref` for the chart.
-4. Run the `db-bootstrap` Job and wait for it.
+4. Run the `db-init` Job and wait for it.
 5. `helm upgrade --install shiptrack … -f deploy/values-gcp.yaml --set image.digest=$DIGEST --atomic --wait --timeout 10m --history-max 10`, with identifying values from masked secrets.
 6. While it waits, a read-only sampler prints pods, events, and the logs of any not-Ready pod every 30 seconds, masked, because `--atomic` removes them on failure.
 7. `kubectl rollout status` for each Deployment, then the contract `smoke` suite through a port-forward.
@@ -402,7 +402,7 @@ The suite needs no change. `ops-contract` runs it from a GitHub-hosted runner wi
 - **Federation is pinned to this repository** by numeric IDs and, for `apply` and `deploy`, to the approved environment's subject. A pull request cannot become `apply`.
 - **No public addresses.** Nodes are private, the database has a private IP only, the control plane is reached through an IAM-authenticated DNS endpoint, and there is no load balancer unless enabled (ADR-0013).
 - **Data:** the database requires TLS; the bucket enforces uniform access and public access prevention; secrets are in Secret Manager and out of Terraform state.
-- **No path to escalate:** the apply account holds no project-level IAM admin and no service account admin on the project. Service accounts are created once by bootstrap, and grants on a resource come from that service's own admin role (ADR-0022).
+- **No path to escalate:** the apply account holds no project-level IAM admin and no service account admin on the project. Service accounts are created once by the seed root, and grants on a resource come from that service's own admin role (ADR-0022).
 - **State** holds no secret values. The bucket is reachable only by the three accounts.
 - **Audit:** Admin Activity logs are on and free. Data Access logs stay off except for Secret Manager **[VERIFY the cost]**.
 
@@ -443,7 +443,7 @@ Cheaper options considered and rejected: a Standard zonal cluster with one Spot 
 | G-R4 | Zonal database: a zone outage is an outage | Accepted for dev; backups for recovery |
 | G-R5 | The apply account is powerful: its admin roles cover the cluster (cluster-admin), the network, and every bucket in the project, including the state bucket | Reachable only from the approved environment; no project IAM or service account administration (ADR-0022); state versioning allows recovery |
 | G-R15 | `apply` and `deploy` trust the same subject (`environment:dev`), so any job in that environment can request either | The environment admits only the reviewed `dev` branch, and workflows reach it through a pull request; the same trade as the AWS repositories |
-| G-R16 | The seed account holds powerful roles | Reachable only from the `bootstrap` environment; not managed by Terraform; narrowed or deleted once bootstrap is stable |
+| G-R16 | The seed account holds powerful roles | Reachable only from the `seed` environment; not managed by Terraform; narrowed or deleted once the seed root is stable |
 | G-R6 | GitHub environment approval is the only gate | The user is the sole reviewer; protected `dev` branch |
 | G-R7 | A renamed or transferred repository could match the federation condition | The condition uses numeric IDs |
 | G-R8 | The control plane is reachable from any network with IAM credentials | IAM is the gate; no IP allow-list to leak; accepted |
@@ -460,7 +460,7 @@ Cheaper options considered and rejected: a Standard zonal cluster with one Spot 
 
 1. Modern's `release-image` publishes one digest to ECR and GHCR; GCP runs that digest.
 2. `shiptrack-modern` runs with `SHIPTRACK_CLOUD=gcp` against GCP resources, and with `aws` and `azure` against theirs, with AWS and Azure behavior unchanged.
-3. Every GCP resource except the by-hand bootstrap (§8.0) is created by Terraform that a workflow applied after approval.
+3. Every GCP resource except the by-hand seed (§8.0) is created by Terraform that a workflow applied after approval.
 4. No service account key exists. No Kubernetes Secret holds a credential. No credential or identifier is in git. The secret scan passes.
 5. The platform contract `full` suite passes through a port-forward.
 6. The simulator ledger shows zero lost events across a deploy and a Spot preemption.
@@ -482,12 +482,12 @@ Phases are applied in order; a phase's "Done when" must pass before the next sta
 | **G1 App seam** (`shiptrack-modern`) | `SHIPTRACK_CLOUD` with `gcp`; secret source, publisher, consumer, object store; settings and tests. Shared with the Azure work | `pytest` green for every cloud; AWS behavior unchanged |
 | **G2 Chart switches** (`shiptrack-modern`) | `cloud: gcp`, fixed scaling, Spot selector, `PodMonitoring`, per-cloud schema | AWS render identical; GCP render passes `kubeconform` |
 | **G3 Image** (`shiptrack-modern`) | GHCR publish with digest equality check (shared with Azure) | The same digest is in both registries; package public |
-| **G4 Bootstrap** | The by-hand steps (§8.0); `terraform/bootstrap`; the `apply-bootstrap` workflow | `apply-bootstrap` has run twice: the second run ends with "No changes"; the five accounts, the state bucket, and the trust exist |
+| **G4 Seed** | The by-hand steps (§8.0); `terraform/seed`; the `apply-seed` workflow | `apply-seed` has run twice: the second run ends with "No changes"; the five accounts, the state bucket, and the trust exist |
 | **G5 Data root** | Network, NAT, Cloud SQL, Pub/Sub, bucket, secrets, workload IAM | Applied by workflow; outputs defined; no value printed |
 | **G6 Cluster root** | GKE Autopilot | Cluster reachable through the DNS endpoint by `deploy` |
 | **G7 Addons root** | Namespace, deployer RBAC | Deploy account can list pods in the namespace and nothing outside it |
 | **G8 Workflows** | `ci-checks`, `ci-terraform`, `apply-terraform`, `deploy-app`, `ops-contract` | `actionlint` passes; all actions SHA-pinned |
-| **G9 Application** | `db-bootstrap`, `migrate`, the release | Release ready; `/readyz` 200 |
+| **G9 Application** | `db-init`, `migrate`, the release | Release ready; `/readyz` 200 |
 | **G10 Validation** | Contract suite, ledger, SLA check, preemption test | Acceptance criteria 5 to 8 |
 | **G11 Operations** | Alerts, dashboard, runbooks, cost analysis | Runbooks tested once |
 
@@ -513,8 +513,8 @@ Still to confirm at build time:
 - [ ] The Workload Identity provider's claim names and attribute condition with numeric repository and owner IDs
 - [ ] The IAM condition that limits which roles `projectIamAdmin` can grant
 - [ ] Signing a V4 URL through the IAM signing API from a pod with no Google service account, and the roles it needs
-- [ ] That the `:environment:`, `:pull_request`, and `:ref:` subject suffixes are unchanged from the default format, as on the AWS repositories (the first run of `apply-bootstrap` shows it; a mismatch appears as a failed authentication)
-- [ ] `gcloud storage buckets describe` on a missing bucket reports 404 from the runner, with the credentials the auth action writes (the first run of `apply-bootstrap`)
+- [ ] That the `:environment:`, `:pull_request`, and `:ref:` subject suffixes are unchanged from the default format, as on the AWS repositories (the first run of `apply-seed` shows it; a mismatch appears as a failed authentication)
+- [ ] `gcloud storage buckets describe` on a missing bucket reports 404 from the runner, with the credentials the auth action writes (the first run of `apply-seed`)
 - [ ] The roles the `gcs` backend needs on the state bucket (`storage.objectUser` for apply, `storage.objectViewer` with `-lock=false` for plan)
 - [ ] `roles/container.defaultNodeServiceAccount` is sufficient for Autopilot nodes, and `roles/container.clusterViewer` carries the permission to connect through the DNS endpoint
 - [ ] The Pub/Sub emulator's support for filters and dead-letter policies

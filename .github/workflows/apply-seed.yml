@@ -1,9 +1,9 @@
-name: apply-bootstrap
+name: apply-seed
 
-# Applies terraform/bootstrap (state bucket, APIs, service accounts, GitHub trust, and permissions)
-# using the manually created seed service account. Both jobs run in the `bootstrap` environment,
+# Applies terraform/seed (state bucket, APIs, service accounts, GitHub trust, and permissions)
+# using the manually created seed service account. Both jobs run in the `seed` environment,
 # which requires a reviewer: approve the first to see the plan summary, then approve the second to
-# apply it. See terraform/bootstrap/README.md for the one-time setup.
+# apply it. See terraform/seed/README.md for the one-time setup.
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: bootstrap
+  group: seed
   cancel-in-progress: false
 
 env:
@@ -22,7 +22,7 @@ jobs:
   plan:
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
-    environment: bootstrap
+    environment: seed
     permissions:
       id-token: write
       contents: read
@@ -47,13 +47,13 @@ jobs:
           TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
           TF_VAR_github_repo: ${{ github.event.repository.name }}
           TF_VAR_github_repository_id: ${{ github.repository_id }}
-        run: terraform/bootstrap/scripts/ci.sh plan
+        run: terraform/seed/scripts/ci.sh plan
 
   apply:
     needs: plan
     if: github.ref == 'refs/heads/dev'
     runs-on: ubuntu-24.04
-    environment: bootstrap
+    environment: seed
     permissions:
       id-token: write
       contents: read
@@ -79,4 +79,4 @@ jobs:
           TF_VAR_github_owner_id: ${{ github.repository_owner_id }}
           TF_VAR_github_repo: ${{ github.event.repository.name }}
           TF_VAR_github_repository_id: ${{ github.repository_id }}
-        run: terraform/bootstrap/scripts/ci.sh apply
+        run: terraform/seed/scripts/ci.sh apply
