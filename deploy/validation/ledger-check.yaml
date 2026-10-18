@@ -1,0 +1,113 @@
+# Checks that every event the API accepted during a validation run was stored, from the release's own image
+# (ADR-0033). The runner holds the simulator's ledger and cannot reach the private database, so ops-validate puts
+# the ledger's idempotency keys in a ConfigMap and this Job looks each one up in tracking_events. An event the API
+# accepted is stored whatever the worker then did with it (applied, duplicate, out of order, or invalid), so a key
+# that is absent after the wait was lost. ops-validate fills in ${IMAGE}, ${GCP_PROJECT_ID}, and ${LEDGER_CONFIGMAP}
+# with envsubst and creates the Job with `kubectl create`; the name is generated. It prints counts and keys only.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: shiptrack-ledger-check-
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: ledger-check
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 900
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shiptrack
+        app.kubernetes.io/component: ledger-check
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shiptrack-db-init
+      automountServiceAccountToken: false
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ledger-check
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -c
+            - |
+              import sys
+              import time
+
+              import psycopg
+
+              from shiptrack.cloud import build_secret_cache
+              from shiptrack.config import load_settings
+
+              WAIT_SECONDS = 300
+              keys = list(dict.fromkeys(line.strip() for line in open("/ledger/keys.txt") if line.strip()))
+
+              settings = load_settings()
+              creds = build_secret_cache(settings).get(settings.require_db_secret())
+              deadline = time.monotonic() + WAIT_SECONDS
+              missing = keys
+              while True:
+                  with psycopg.connect(
+                      host=creds.host, port=creds.port, dbname=creds.dbname,
+                      user=creds.username, password=creds.password,
+                      sslmode=settings.db_sslmode, connect_timeout=10,
+                  ) as connection:
+                      rows = connection.execute(
+                          "SELECT idempotency_key FROM shiptrack.tracking_events WHERE idempotency_key = ANY(%s)",
+                          (missing,),
+                      ).fetchall()
+                  found = {row[0] for row in rows}
+                  missing = [key for key in missing if key not in found]
+                  print(f"accepted={len(keys)} stored={len(keys) - len(missing)} missing={len(missing)}", flush=True)
+                  if not missing or time.monotonic() > deadline:
+                      break
+                  time.sleep(15)
+
+              for key in missing[:20]:
+                  print(f"  missing: {key}")
+              print(f"FAIL: {len(missing)} accepted event(s) were never stored" if missing else "ok: every accepted event is stored")
+              sys.exit(1 if missing else 0)
+          env:
+            - name: SHIPTRACK_CLOUD
+              value: "gcp"
+            - name: SHIPTRACK_GCP_PROJECT
+              value: "${GCP_PROJECT_ID}"
+            - name: SHIPTRACK_DB_SECRET_NAME
+              value: "shiptrack-db-app"
+            - name: SHIPTRACK_LOG_LEVEL
+              value: "WARNING"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: ledger
+              mountPath: /ledger
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: ledger
+          configMap:
+            name: ${LEDGER_CONFIGMAP}

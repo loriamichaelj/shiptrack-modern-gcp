@@ -120,6 +120,9 @@ jobs:
           # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
           IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/shiptrack-modern@${IMAGE_DIGEST}" \
             envsubst '${IMAGE} ${GCP_PROJECT_ID}' <deploy/validation/sla-check.yaml >rendered/sla-check.yaml
+          # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/shiptrack-modern@${IMAGE_DIGEST}" LEDGER_CONFIGMAP=shiptrack-ledger-example \
+            envsubst '${IMAGE} ${GCP_PROJECT_ID} ${LEDGER_CONFIGMAP}' <deploy/validation/ledger-check.yaml >rendered/ledger-check.yaml
       - name: Validate (strict, with the CRD schemas)
         run: |
           crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
@@ -138,6 +141,8 @@ jobs:
           pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/db-init.yaml --framework kubernetes --compact --quiet \
             --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
           pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/sla-check.yaml --framework kubernetes --compact --quiet \
+            --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
+          pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/ledger-check.yaml --framework kubernetes --compact --quiet \
             --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
       - name: Database connection budget
         run: |
