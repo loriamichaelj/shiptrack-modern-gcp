@@ -12,11 +12,13 @@
 #
 # The port-forward is restarted whenever it drops, because the pod it points at is being replaced. A request
 # that fails while the pod goes is an availability blip and is reported; it never enters the ledger, so it is
-# not a loss. The check that decides the result is the ledger: accepted (202) and never stored.
+# not a loss. The check that decides the result is the ledger: accepted (202) and never stored. A Job in the
+# cluster (deploy/validation/ledger-check.yaml) looks up each idempotency key in the database, because the
+# tracking timeline lists only applied events and an out-of-order event is stored but not applied.
 #
 # Environment: NAMESPACE (default shiptrack), SERVICE (default shiptrack-api), LOCAL_PORT (default 18000),
 # SHIPMENTS (300), CONCURRENCY (10), DELAY (3, seconds between a shipment's events), SEED (1),
-# GCP_PROJECT_ID (sla only). Needs kubectl with credentials for the cluster, curl, and uv.
+# GCP_PROJECT_ID (required). Needs kubectl with credentials for the cluster, curl, and uv.
 set -euo pipefail
 
 scenario=${1:?usage: validate.sh deploy|preemption|sla <simulator-dir>}
@@ -25,6 +27,8 @@ sim_dir=${2:?usage: validate.sh deploy|preemption|sla <simulator-dir>}
 [[ -d "$sim_dir" ]] || { echo "no simulator directory: $sim_dir" >&2; exit 2; }
 sim_dir=$(cd "$sim_dir" && pwd)
 
+: "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}"
+echo "::add-mask::$GCP_PROJECT_ID"
 namespace=${NAMESPACE:-shiptrack}
 service=${SERVICE:-shiptrack-api}
 port=${LOCAL_PORT:-18000}
@@ -85,6 +89,24 @@ wait_ready() {
   done
 }
 
+# run_check_job <manifest>: creates a Job from the release's own image with envsubst, waits for it, prints its
+# log (counts only; the database address is hidden in case a library names it), and fails unless it succeeded.
+run_check_job() {
+  local manifest=$1 image job succeeded failed
+  image=$(kubectl -n "$namespace" get deployment shiptrack-api -o jsonpath='{.spec.template.spec.containers[0].image}')
+  # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
+  job=$(IMAGE="$image" envsubst '${IMAGE} ${GCP_PROJECT_ID} ${LEDGER_CONFIGMAP}' <"$manifest" | kubectl create -f - -o name)
+  for _ in $(seq 1 130); do
+    succeeded=$(kubectl -n "$namespace" get "$job" -o jsonpath='{.status.succeeded}')
+    failed=$(kubectl -n "$namespace" get "$job" -o jsonpath='{.status.failed}')
+    [[ "$succeeded" == 1 || "${failed:-0}" -ge 1 ]] && break
+    sleep 10
+  done
+  kubectl -n "$namespace" logs "$job" --all-containers --tail=60 2>&1 \
+    | sed -E -e 's/("host": ")[^"]*/\1<HOST>/g' -e 's/(host=)[^ ]+/\1<HOST>/g'
+  [[ "$(kubectl -n "$namespace" get "$job" -o jsonpath='{.status.succeeded}')" == 1 ]]
+}
+
 check_ledger() {
   local ledger="" candidate
   # The names carry a timestamp, so the last in glob order is the newest.
@@ -92,8 +114,15 @@ check_ledger() {
     [[ -e "$candidate" ]] && ledger=$candidate
   done
   [[ -n "$ledger" ]] || { echo "FAIL: the simulator wrote no ledger" >&2; exit 1; }
-  echo "checking $(wc -l <"$ledger" | tr -d ' ') accepted events against the tracking timelines"
-  sim verify --ledger "$ledger" --base-url "$base" --target none --wait 300
+  jq -r '.idempotency_key' "$ledger" | sort -u >"$results/keys.txt"
+  echo "checking $(wc -l <"$results/keys.txt" | tr -d ' ') accepted events against the database; the Job waits up to 5 minutes for the workers"
+  LEDGER_CONFIGMAP="shiptrack-ledger-$(date -u +%Y%m%d%H%M%S)"
+  export LEDGER_CONFIGMAP
+  kubectl -n "$namespace" create configmap "$LEDGER_CONFIGMAP" --from-file=keys.txt="$results/keys.txt" >/dev/null
+  local status=0
+  run_check_job deploy/validation/ledger-check.yaml || status=$?
+  kubectl -n "$namespace" delete configmap "$LEDGER_CONFIGMAP" >/dev/null
+  if ((status != 0)); then echo "::error::an accepted event was never stored"; exit 1; fi
 }
 
 case "$scenario" in
@@ -121,25 +150,10 @@ case "$scenario" in
     check_ledger
     ;;
   sla)
-    : "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required for sla}"
-    image=$(kubectl -n "$namespace" get deployment shiptrack-api -o jsonpath='{.spec.template.spec.containers[0].image}')
-    echo "::add-mask::$GCP_PROJECT_ID"
     start_traffic
     finish_traffic
     echo "starting the SLA check in the cluster; it waits up to 15 minutes for the scan to flag every overdue shipment"
-    # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
-    job=$(IMAGE="$image" envsubst '${IMAGE} ${GCP_PROJECT_ID}' <deploy/validation/sla-check.yaml | kubectl create -f - -o name)
-    for _ in $(seq 1 130); do
-      succeeded=$(kubectl -n "$namespace" get "$job" -o jsonpath='{.status.succeeded}')
-      failed=$(kubectl -n "$namespace" get "$job" -o jsonpath='{.status.failed}')
-      [[ "$succeeded" == 1 || "${failed:-0}" -ge 1 ]] && break
-      sleep 10
-    done
-    # The Job's log holds counts; the database address is hidden in case a library names it.
-    kubectl -n "$namespace" logs "$job" --all-containers --tail=60 2>&1 \
-      | sed -E -e 's/("host": ")[^"]*/\1<HOST>/g' -e 's/(host=)[^ ]+/\1<HOST>/g'
-    [[ "$(kubectl -n "$namespace" get "$job" -o jsonpath='{.status.succeeded}')" == 1 ]] \
-      || { echo "::error::the SLA check did not pass"; exit 1; }
+    run_check_job deploy/validation/sla-check.yaml || { echo "::error::the SLA check did not pass"; exit 1; }
     ;;
 esac
 echo "validation ${scenario}: passed"

@@ -1,8 +1,8 @@
 name: ops-validate
 
 # Validation of the running stack (acceptance criteria 6 and 7): the platform's carrier simulator sends events
-# through `kubectl port-forward` while the pods are disturbed, and its ledger shows whether any event the API
-# accepted was never stored. Scenarios:
+# through `kubectl port-forward` while the pods are disturbed, and a Job in the cluster looks every accepted
+# event up in the database by its idempotency key, which shows whether any was never stored. Scenarios:
 #   deploy      every Deployment restarted at once, as a release does
 #   preemption  every pod deleted with the 25 second grace of a Spot pod, twice (a real reclaim cannot be forced)
 #   sla         shipments created already late, then a Job in the cluster checks one alert per breached shipment
