@@ -16,7 +16,8 @@ dead-letter queue. Messages are kept for 14 days there.
 Only after the cause is fixed, or the message returns here after five more deliveries.
 1. Actions, **ops-queues**, action `redrive`, the same flow. Approve the `dev` environment.
 2. Each message is republished to the flow's topic and acknowledged in the dead-letter queue only after the
-   publish worked. The run prints how many it moved.
+   publish worked. The run prints how many it moved. A message that fails again comes back to the dead-letter
+   queue within seconds; the run sees that, leaves it there, and stops with a note, so run `discard` for it.
 3. Run `status` again: it should show 0 messages.
 
 ## Check

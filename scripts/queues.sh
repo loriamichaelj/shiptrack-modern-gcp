@@ -10,7 +10,8 @@
 #             deliveries Pub/Sub moves it to the dead-letter topic and the dead-letter alert fires.
 #   redrive   moves every message from the dead-letter subscription back to the flow's topic, one at a time:
 #             a message is acknowledged only after its republish succeeded. Dead-lettering attributes are
-#             dropped. Do this after the cause is fixed, or it returns to the dead-letter queue.
+#             dropped. Do this after the cause is fixed, or it returns to the dead-letter queue; a message that comes
+#             straight back is left there and the run stops, so a message that still fails is moved once, not in a loop.
 #   discard   acknowledges and drops every message in the dead-letter subscription, for messages that should never
 #             be applied (a malformed one, or the test message of `poison`). It cannot be undone.
 #
@@ -57,7 +58,9 @@ case "$action" in
     ;;
   redrive)
     moved=0
-    while ((moved < max)); do
+    seen=""
+    returned=0
+    while ((moved < max && returned == 0)); do
       messages=$(pull 10)
       count=$(jq 'length' <<<"$messages")
       ((count > 0)) || break
@@ -70,14 +73,25 @@ case "$action" in
           echo "::error::a message has attributes that cannot be republished safely; it stays in the dead-letter queue"
           exit 1
         fi
+        # A message that is still unreadable fails its five deliveries and comes back here within seconds. One that was
+        # republished in this run and is back is left alone, and the run stops, or it would go round until the cap.
+        fingerprint=$(printf '%s|%s' "$body" "$attributes" | sha256sum | cut -d' ' -f1)
+        if grep -qx "$fingerprint" <<<"$seen"; then
+          returned=1
+          break
+        fi
         publish=(gcloud pubsub topics publish "$topic" --project "$GCP_PROJECT_ID" --message "$body")
         [[ -n "$attributes" ]] && publish+=(--attribute "$attributes")
         "${publish[@]}" >/dev/null
         gcloud pubsub subscriptions ack "$dead_letter_subscription" --project "$GCP_PROJECT_ID" --ack-ids "$ack_id" >/dev/null
+        seen="${seen}"$'\n'"${fingerprint}"
         moved=$((moved + 1))
       done
     done
     echo "${flow}: moved ${moved} message(s) from the dead-letter queue back to the topic"
+    if ((returned == 1)); then
+      echo "${flow}: a message that was just redriven is back in the dead-letter queue, so it still fails; redrive stopped. Fix the cause, or discard it."
+    fi
     ;;
   discard)
     dropped=0
