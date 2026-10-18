@@ -1,0 +1,61 @@
+name: ops-check-metrics
+
+# Shows whether the application's metrics reach Managed Service for Prometheus (runbooks docs/runbooks). It
+# prints the PodMonitoring's conditions and per-endpoint scrape status, then reads /metrics from one api pod
+# through a port-forward and counts the series it serves. It changes nothing and prints no metric values.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metrics:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+      - name: PodMonitoring status
+        run: |
+          kubectl -n shiptrack get podmonitoring shiptrack -o json | jq '{
+            selector: .spec.selector.matchLabels,
+            endpoints: .spec.endpoints,
+            conditions: [.status.conditions[]? | {type, status, reason, message}],
+            endpointStatuses: [.status.endpointStatuses[]? | {name, activeTargets, unhealthyTargets, collectorsFraction,
+              errors: [.sampleGroups[]?.sampleTargets[]? | .lastError // empty] | unique}]
+          }'
+      - name: Read /metrics from one api pod
+        run: |
+          pod=$(kubectl -n shiptrack get pods -l app.kubernetes.io/component=api -o name | head -n 1)
+          echo "pod: ${pod#pod/}"
+          kubectl -n shiptrack get "$pod" -o json | jq -c '{labels: .metadata.labels, ports: [.spec.containers[].ports[]?]}'
+          kubectl -n shiptrack port-forward "$pod" 19090:9090 >/dev/null 2>&1 &
+          trap 'kill $! 2>/dev/null || true' EXIT
+          for _ in $(seq 1 15); do
+            curl -sS --max-time 5 -o /tmp/metrics.txt http://localhost:19090/metrics 2>/dev/null && break
+            sleep 2
+          done
+          echo "series served: $(grep -vc '^#' /tmp/metrics.txt)"
+          for name in http_requests_total http_request_duration_seconds_bucket shiptrack_db_pool_checked_out; do
+            echo "${name}: $(grep -c "^${name}" /tmp/metrics.txt) series"
+          done
