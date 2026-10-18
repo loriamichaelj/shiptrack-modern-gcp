@@ -47,7 +47,7 @@ forward_forever &
 forwarder=$!
 sim_pid=""
 cleanup() {
-  [[ -n "$sim_pid" ]] && kill "$sim_pid" 2>/dev/null || true
+  if [[ -n "$sim_pid" ]]; then kill "$sim_pid" 2>/dev/null || true; fi
   kill "$forwarder" 2>/dev/null || true
   pkill -f "kubectl.*port-forward svc/${service}" 2>/dev/null || true
 }
