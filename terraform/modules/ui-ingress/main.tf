@@ -24,6 +24,7 @@ resource "google_compute_address" "ui" {
   name         = var.name
   region       = var.region
   address_type = "EXTERNAL"
+  labels       = var.labels
 }
 
 resource "google_compute_region_security_policy" "ui" {
