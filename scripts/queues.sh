@@ -2,7 +2,7 @@
 # Looks at, fills, and drains the dead-letter queues from a runner (ADR-0034). Prints counts, ids, and
 # attribute names; never a message body, because a body can hold a shipment's details.
 #
-# Usage: scripts/queues.sh status|poison|redrive events|notifications
+# Usage: scripts/queues.sh status|poison|redrive|discard events|notifications
 #   status    pulls up to 20 messages from the flow's dead-letter subscription without acknowledging them,
 #             and prints how many it saw, with each message's id, age, and delivery attempts. A pulled
 #             message is hidden for the subscription's acknowledgement deadline and then visible again.
@@ -11,13 +11,15 @@
 #   redrive   moves every message from the dead-letter subscription back to the flow's topic, one at a time:
 #             a message is acknowledged only after its republish succeeded. Dead-lettering attributes are
 #             dropped. Do this after the cause is fixed, or it returns to the dead-letter queue.
+#   discard   acknowledges and drops every message in the dead-letter subscription, for messages that should never
+#             be applied (a malformed one, or the test message of `poison`). It cannot be undone.
 #
 # Environment: GCP_PROJECT_ID (required), MAX_MESSAGES for redrive (default 500).
 # Needs gcloud with credentials that may pull from and publish to the flow's topics and subscriptions, and jq.
 set -euo pipefail
 
-action=${1:?usage: queues.sh status|poison|redrive events|notifications}
-flow=${2:?usage: queues.sh status|poison|redrive events|notifications}
+action=${1:?usage: queues.sh status|poison|redrive|discard events|notifications}
+flow=${2:?usage: queues.sh status|poison|redrive|discard events|notifications}
 : "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}"
 echo "::add-mask::$GCP_PROJECT_ID"
 
@@ -76,6 +78,18 @@ case "$action" in
       done
     done
     echo "${flow}: moved ${moved} message(s) from the dead-letter queue back to the topic"
+    ;;
+  discard)
+    dropped=0
+    while ((dropped < max)); do
+      messages=$(pull 10)
+      count=$(jq 'length' <<<"$messages")
+      ((count > 0)) || break
+      ack_ids=$(jq -r '[.[].ackId] | join(",")' <<<"$messages")
+      gcloud pubsub subscriptions ack "$dead_letter_subscription" --project "$GCP_PROJECT_ID" --ack-ids "$ack_ids" >/dev/null
+      dropped=$((dropped + count))
+    done
+    echo "${flow}: dropped ${dropped} message(s) from the dead-letter queue"
     ;;
   *) echo "unknown action: $action" >&2; exit 2 ;;
 esac
