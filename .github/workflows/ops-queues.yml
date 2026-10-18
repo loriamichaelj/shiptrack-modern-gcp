@@ -1,0 +1,58 @@
+name: ops-queues
+
+# Looks at, fills, and drains a dead-letter queue (ADR-0034, runbook docs/runbooks/dead-letter-redrive.md).
+#   status    how many messages wait in the flow's dead-letter queue, with ids and ages, never a message body
+#   poison    publishes one malformed message, so the dead-letter path and its alert can be seen working
+#   redrive   moves every dead-lettered message back to the flow's topic, after the cause is fixed
+# It runs as the apply account in the `dev` environment, so the owner approves every run. `redrive` and
+# `poison` change what the workers receive.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do"
+        required: true
+        type: choice
+        options:
+          - status
+          - poison
+          - redrive
+      flow:
+        description: "Which queue"
+        required: true
+        type: choice
+        options:
+          - events
+          - notifications
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-queues
+  cancel-in-progress: false
+
+jobs:
+  queues:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: Run
+        env:
+          ACTION: ${{ inputs.action }}
+          FLOW: ${{ inputs.flow }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: scripts/queues.sh "$ACTION" "$FLOW"

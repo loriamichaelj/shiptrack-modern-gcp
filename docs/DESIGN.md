@@ -102,7 +102,7 @@ Every pod authenticates with its own Kubernetes service account, which Google tr
 shiptrack-modern-gcp/
 ├── docs/
 │   ├── DESIGN.md  ADR.md
-│   └── runbooks/                      # written after the build, not before
+│   └── runbooks/                      # one page per situation; each records when it was tested
 ├── terraform/
 │   ├── seed/                     # state bucket, APIs, service accounts, GitHub trust, permissions (README: one-time setup)
 │   │   └── scripts/                   # ci.sh (plan/apply, first-run bucket seeding), github-setup.sh
@@ -335,6 +335,8 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | `deploy-app` | dispatch with a digest | Deploy (below) |
 | `ops-contract` | dispatch | Contract suite through a port-forward (§9.3) |
 | `ops-validate` | dispatch with a scenario | Event-loss, preemption, and SLA checks (§9.3) |
+| `ops-queues` | dispatch with an action and a flow | Status, a malformed test message, and redrive of a dead-letter queue (ADR-0034) |
+| `ops-check-state` | dispatch | Lists the saved versions of each root's state; changes nothing (ADR-0034) |
 
 `deploy-app`:
 1. `environment: dev` (the user approves); `concurrency: deploy-dev` without cancel.

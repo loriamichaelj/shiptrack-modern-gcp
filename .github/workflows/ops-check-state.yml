@@ -1,0 +1,46 @@
+name: ops-check-state
+
+# Lists the saved versions of each root's Terraform state (runbook docs/runbooks/state-recovery.md). It
+# changes nothing. It runs as the read-only plan account in the `ci` environment, and prints each root's
+# object name, version number, and time, never a bucket name or any state content.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  state:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: ci
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_PLAN_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - name: List the state versions
+        env:
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_NUMBER"
+          bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
+          echo "::add-mask::$bucket"
+          {
+            echo "## Terraform state versions"
+            echo
+            echo "| Object | Version | Saved (UTC) | State |"
+            echo "|---|---|---|---|"
+            gcloud storage objects list "gs://${bucket}/gcp/**" --all-versions \
+              --format='csv[no-heading,separator="|"](name,generation,timeCreated,timeDeleted)' \
+              | sort -t'|' -k1,1 -k2,2r \
+              | awk -F'|' '{ state = ($4 == "") ? "live" : "older"; printf "| %s | %s | %s | %s |\n", $1, $2, $3, state }'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
