@@ -10,7 +10,7 @@ dead-letter queue. Messages are kept for 14 days there.
    (`resource.type="k8s_container"`, namespace `shiptrack`, severity `ERROR`). The record names the error and
    the message's `idempotency_key`.
 3. Decide: a bug in the application (fix and deploy first), a failing dependency (wait until it is back), or a
-   message that is wrong and should not be applied (leave it; it expires after 14 days).
+   message that is wrong and should not be applied (run `discard`, or leave it; it expires after 14 days).
 
 ## Redrive
 Only after the cause is fixed, or the message returns here after five more deliveries.

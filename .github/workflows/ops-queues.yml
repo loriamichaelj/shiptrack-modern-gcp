@@ -4,8 +4,9 @@ name: ops-queues
 #   status    how many messages wait in the flow's dead-letter queue, with ids and ages, never a message body
 #   poison    publishes one malformed message, so the dead-letter path and its alert can be seen working
 #   redrive   moves every dead-lettered message back to the flow's topic, after the cause is fixed
-# It runs as the apply account in the `dev` environment, so the owner approves every run. `redrive` and
-# `poison` change what the workers receive.
+#   discard   drops every dead-lettered message for good (a malformed message, or the test message of `poison`)
+# It runs as the apply account in the `dev` environment, so the owner approves every run. `redrive`, `poison`,
+# and `discard` change what the workers receive or keep.
 
 on:
   workflow_dispatch:
@@ -18,6 +19,7 @@ on:
           - status
           - poison
           - redrive
+          - discard
       flow:
         description: "Which queue"
         required: true
