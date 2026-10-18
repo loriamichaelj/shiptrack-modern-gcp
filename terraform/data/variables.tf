@@ -64,3 +64,9 @@ variable "proof_of_delivery_protection" {
   type        = bool
   default     = true
 }
+
+variable "alert_email" {
+  description = "Address that receives the alerts of the monitoring module. Sensitive so that plan output never prints it."
+  type        = string
+  sensitive   = true
+}

@@ -8,6 +8,7 @@ bindings follow the cluster. Design: `docs/DESIGN.md`.
 | `main.tf` | The `network` module (`../modules/network`): VPC, subnet with secondary ranges for pods and services, router and Cloud NAT, and the range and peering for private services access |
 | `main.tf` (cont.) | The `cloud_sql`, `secrets`, `pubsub`, and `proof_of_delivery_storage` modules, in `../modules` |
 | `main.tf` (cont.) | The `ui_ingress` module: the proxy-only subnet, address, and Cloud Armor policy the UI's load balancer needs. The Gateway itself is applied by `ops-ui-port` |
+| `main.tf` (cont.) | The `monitoring` module: the alert policies, the notification channel, and the dashboard (ADR-0032). The alert address comes from the `GCP_ALERT_EMAIL` secret |
 | `credentials.tf` | The database passwords, as ephemeral values: generated for one run, never stored |
 | `outputs.tf` | Names the other roots look resources up by. Nothing here is secret, and no workflow prints it |
 
@@ -22,8 +23,8 @@ Before the first run, give the `ci` and `dev` environments their secrets (`terra
   plan runs against empty state and shows every resource as a create.
 - After the merge, Actions, **apply-terraform**, root `data`, on `dev`. Approve the `dev` environment. The
   run plans again and applies that plan; the log lists addresses and actions, never values.
-- **destroy-network**, **destroy-cloud-sql**, **destroy-secrets**, **destroy-pubsub**, and
-  **destroy-proof-of-delivery-storage**, and **destroy-ingress** take a group down again, after two approvals and the typed name.
+- **destroy-network**, **destroy-cloud-sql**, **destroy-secrets**, **destroy-pubsub**,
+  **destroy-proof-of-delivery-storage**, **destroy-ingress**, and **destroy-monitoring** take a group down again, after two approvals and the typed name.
   Remove the cluster first, then Cloud SQL, then the network. `destroy-cloud-sql` deletes the data and the
   backups, and `destroy-proof-of-delivery-storage` deletes every stored document.
 

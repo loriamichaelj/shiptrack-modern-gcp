@@ -57,3 +57,8 @@ output "ui_ingress" {
     proxy_only_cidr = module.ui_ingress.proxy_only_cidr
   }
 }
+
+output "alert_policies" {
+  description = "Display names of the alert policies. Nothing here is secret."
+  value       = module.monitoring.alert_policies
+}

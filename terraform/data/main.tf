@@ -58,3 +58,13 @@ module "ui_ingress" {
   region     = var.region
   network_id = module.network.network_id
 }
+
+module "monitoring" {
+  source = "../modules/monitoring"
+
+  project_id                = var.project_id
+  alert_email               = var.alert_email
+  labels                    = local.labels
+  subscriptions             = module.pubsub.subscriptions
+  dead_letter_subscriptions = module.pubsub.dead_letter_subscriptions
+}

@@ -21,6 +21,7 @@
 #   GCP_PROJECT_ID       project that holds the resources (required)
 #   GCP_PROJECT_NUMBER   its number; part of the state bucket's name (required)
 #   GCP_REGION           region (default us-central1)
+#   GCP_ALERT_EMAIL      address for the monitoring alerts (required for the data root, whose plan needs it)
 set -euo pipefail
 
 root=${1:?usage: terraform-destroy.sh <root> plan|destroy <name> <target>...}
@@ -38,6 +39,11 @@ if [[ "${CONFIRM:-}" != "$name" ]]; then
   exit 1
 fi
 
+if [[ "$root" == data ]]; then
+  : "${GCP_ALERT_EMAIL:?GCP_ALERT_EMAIL is required for the data root}"
+  export TF_VAR_alert_email=$GCP_ALERT_EMAIL
+  echo "::add-mask::$GCP_ALERT_EMAIL"
+fi
 export TF_VAR_project_id=$GCP_PROJECT_ID
 export TF_VAR_project_number=$GCP_PROJECT_NUMBER
 export TF_VAR_region=${GCP_REGION:-us-central1}
