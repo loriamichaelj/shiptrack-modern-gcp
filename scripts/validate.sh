@@ -10,14 +10,17 @@
 #   sla         the simulator sends shipments, some created already late, and a Job in the cluster checks
 #               that every breached shipment has exactly one alert (deploy/validation/sla-check.yaml).
 #
-# The port-forward is restarted whenever it drops, because the pod it points at is being replaced. A request
-# that fails while the pod goes is an availability blip and is reported; it never enters the ledger, so it is
-# not a loss. The check that decides the result is the ledger: accepted (202) and never stored. A Job in the
+# The port-forward is restarted whenever it drops, because the pod it points at is being replaced, and the
+# simulator tries a request again for RETRY_SECONDS, as a client behind a load balancer does; an event is sent
+# again with the same Idempotency-Key. A request that still fails is an availability blip and is reported; it
+# never enters the ledger, so it is not a loss. The run fails if fewer than 95% of the shipments could be created,
+# because a run in which the traffic stopped when the pods were replaced proves nothing. The check that decides the result is the ledger: accepted (202) and never stored. A Job in the
 # cluster (deploy/validation/ledger-check.yaml) looks up each idempotency key in the database, because the
 # tracking timeline lists only applied events and an out-of-order event is stored but not applied.
 #
 # Environment: NAMESPACE (default shiptrack), SERVICE (default shiptrack-api), LOCAL_PORT (default 18000),
 # SHIPMENTS (300), CONCURRENCY (10), DELAY (3, seconds between a shipment's events), SEED (1),
+# RETRY_SECONDS (180, how long the simulator tries a failed request again),
 # GCP_PROJECT_ID (required). Needs kubectl with credentials for the cluster, curl, and uv.
 set -euo pipefail
 
@@ -36,6 +39,7 @@ shipments=${SHIPMENTS:-300}
 concurrency=${CONCURRENCY:-10}
 delay=${DELAY:-3}
 seed=${SEED:-1}
+retry=${RETRY_SECONDS:-180}
 base="http://localhost:${port}"
 results="$PWD/validation-results"
 mkdir -p "$results"
@@ -68,7 +72,7 @@ sim() { (cd "$sim_dir" && uv run --frozen shiptrack-sim "$@"); }
 start_traffic() {
   echo "sending ${shipments} shipments, ${concurrency} at a time, ${delay} s between a shipment's events"
   sim run --base-url "$base" --target none --shipments "$shipments" --concurrency "$concurrency" \
-    --delay "$delay" --seed "$seed" --results-dir "$results" >"$sim_log" 2>&1 &
+    --delay "$delay" --seed "$seed" --retry-seconds "$retry" --results-dir "$results" >"$sim_log" 2>&1 &
   sim_pid=$!
 }
 
@@ -79,7 +83,13 @@ finish_traffic() {
   wait "$sim_pid" || status=$?
   sim_pid=""
   cat "$sim_log"
-  echo "simulator exit status: ${status} (non-zero means some requests failed while pods were replaced)"
+  echo "simulator exit status: ${status} (non-zero means some requests still failed after ${retry} s of retries)"
+  local created
+  created=$(sed -nE 's/^shipments created +([0-9]+) .*/\1/p' "$sim_log")
+  if ((${created:-0} * 100 < shipments * 95)); then
+    echo "::error::only ${created:-0} of ${shipments} shipments were created, so the traffic did not last through the disturbance"
+    exit 1
+  fi
 }
 
 wait_ready() {
