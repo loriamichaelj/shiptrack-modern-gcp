@@ -21,4 +21,6 @@ keeps the newest ten versions of every object, and nothing but the three pipelin
 ## Check
 - The plan comment says "No changes" for the root.
 
-**Tested:** not yet.
+**Tested:** step 1 only, on 2026-10-18: `ops-check-state` listed every root's versions with generation numbers, and I
+checked the listing against the bucket. The restore (step 2) has not been run, because it overwrites live state.
+Rehearse it first by copying a version to a scratch object name and comparing, never over a live file.

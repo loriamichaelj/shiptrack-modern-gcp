@@ -16,4 +16,4 @@ a database login fails, then fetches once more.
 - `ops-contract` passes.
 - No alert fires, and the dashboard's database connection tile stays steady.
 
-**Tested:** not yet.
+**Tested:** not yet. It changes the live database passwords, so it is run once on purpose, not as a side effect.

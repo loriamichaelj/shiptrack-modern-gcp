@@ -15,4 +15,5 @@ minutes.
 ## Check
 - No restarts for fifteen minutes and the alert clears.
 
-**Tested:** not yet.
+**Tested:** not as a response to the alert. The restarts of `ops-validate` did not reach the alert's threshold of more
+than three in ten minutes.

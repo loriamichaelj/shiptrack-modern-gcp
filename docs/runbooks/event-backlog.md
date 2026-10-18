@@ -17,4 +17,5 @@
 ## Check
 - The queue age falls below 120 s and the alert clears.
 
-**Tested:** not yet.
+**Tested:** not as a response to the alert. `ops-validate` `deploy` and `preemption` (2026-10-18) restarted and deleted
+the workers under load and the queue drained with no event lost.
