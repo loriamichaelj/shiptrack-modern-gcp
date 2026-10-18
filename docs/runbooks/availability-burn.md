@@ -14,4 +14,4 @@
 ## Check
 - The 5xx ratio is back near zero and the alert clears. Keep the dashboard open for the long window.
 
-**Tested:** not yet.
+**Tested:** not yet. Both burn-rate alerts exist; no 5xx has been injected.

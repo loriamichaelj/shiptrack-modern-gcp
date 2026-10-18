@@ -20,4 +20,6 @@ A schema change is not undone by a rollback, so a release must keep the schema c
 - The run is green and `ops-contract` passes.
 - The dashboard `shiptrack` shows requests and no 5xx; no alert is firing.
 
-**Tested:** not yet.
+**Tested:** the deploy path on 2026-10-17 and 2026-10-18 (`deploy-app` runs 39072240811 and 39141714025: image check,
+`db-init`, Helm `--atomic`, rollout, smoke suite). Not covered: a rollback to an older digest, and the automatic rollback
+after a failed smoke suite, because only one image has been deployed.

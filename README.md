@@ -68,7 +68,7 @@ export), which is separate so that taking the others down keeps the cost history
 | Deploy files | Built: the Helm values, the pinned chart, the db-init Job, and a pull request check that renders and scans them |
 | Monitoring | Built: alert policies, the notification channel, and a dashboard in the `data` root; `destroy-monitoring` |
 | Validation | Built: `ops-validate` (event loss across a deploy and a pod reclaim, and the SLA alert check). Not passed yet |
-| Operations | Runbooks and `ops-queues` built, not yet tested. Still to do: the cost analysis, and a run of each destroy workflow |
+| Operations | Runbooks written; the dead-letter one is tested end to end, the state one in part. Still to do: a rollback and a secret rotation, the cost analysis, and a run of each destroy workflow |
 
 ## Opening the UI in a browser
 

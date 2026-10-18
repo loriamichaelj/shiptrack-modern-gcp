@@ -13,4 +13,5 @@ runs every five minutes and flags overdue shipments, so overdue shipments are no
 ## Check
 - A `sla_scan_completed` record in Cloud Logging, and `ops-validate` `sla` passes.
 
-**Tested:** not yet.
+**Tested:** not as a response to the alert. `ops-validate` with `sla` (2026-10-18) showed the scan flagging overdue
+shipments with exactly one alert each, and the heartbeat metric and alert exist.

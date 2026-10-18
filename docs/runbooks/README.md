@@ -1,7 +1,7 @@
 # Runbooks
 
 One page per situation. Each says when to use it, what to check, what to do, and how to know it worked. A
-runbook is tested once, on the running stack, and its last line records when and how. Commands that need the
+runbook is tested once, on the running stack, and its last line records when, how, and what the test did not cover. Commands that need the
 cluster assume you fetched credentials yourself:
 
 ```sh
