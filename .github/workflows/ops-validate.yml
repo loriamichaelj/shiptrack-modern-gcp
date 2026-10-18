@@ -1,0 +1,106 @@
+name: ops-validate
+
+# Validation of the running stack (acceptance criteria 6 and 7): the platform's carrier simulator sends events
+# through `kubectl port-forward` while the pods are disturbed, and its ledger shows whether any event the API
+# accepted was never stored. Scenarios:
+#   deploy      every Deployment restarted at once, as a release does
+#   preemption  every pod deleted with the 25 second grace of a Spot pod, twice (a real reclaim cannot be forced)
+#   sla         shipments created already late, then a Job in the cluster checks one alert per breached shipment
+# It creates shipments, events, and proof-of-delivery documents in this environment's database, so the `dev`
+# environment requires the owner's approval. It needs a release to be deployed first (deploy-app).
+
+on:
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "What to validate"
+        required: true
+        type: choice
+        options:
+          - deploy
+          - preemption
+          - sla
+      shipments:
+        description: "Shipments to send (the run lasts about 3 seconds per event)"
+        required: false
+        default: "300"
+        type: string
+      platform_ref:
+        description: "Branch, tag, or commit of shiptrack-platform to take the simulator from"
+        required: false
+        default: dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.13.1"
+  PLATFORM_REPO: ${{ github.repository_owner }}/shiptrack-platform
+
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    timeout-minutes: 90
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+
+      - name: Pin the simulator
+        id: pin
+        env:
+          REF: ${{ inputs.platform_ref || 'dev' }}
+        run: |
+          if [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            sha=$REF
+          else
+            sha=$(git ls-remote "https://github.com/$PLATFORM_REPO" "$REF" "refs/heads/$REF" "refs/tags/$REF" | awk 'NR==1 {print $1}')
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "could not resolve '$REF' in $PLATFORM_REPO" >&2; exit 1; }
+          echo "sha=$sha" >>"$GITHUB_OUTPUT"
+          echo "using the simulator from $PLATFORM_REPO at ${sha:0:12}"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PLATFORM_REPO }}
+          ref: ${{ steps.pin.outputs.sha }}
+          path: platform
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Validate
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          SHIPMENTS: ${{ inputs.shipments }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          [[ "$SHIPMENTS" =~ ^[0-9]{1,4}$ ]] || { echo "shipments must be a number" >&2; exit 2; }
+          scripts/validate.sh "$SCENARIO" platform/validation/simulator

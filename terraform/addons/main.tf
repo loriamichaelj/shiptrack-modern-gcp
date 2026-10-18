@@ -96,6 +96,14 @@ resource "kubernetes_role_v1" "deployer" {
     verbs      = ["get", "list", "watch"]
   }
 
+  # Deleting a pod is how ops-validate stands in for a Spot reclaim (ADR-0033). The role can already delete the
+  # Deployments that own the pods, so this widens nothing.
+  rule {
+    api_groups = [""]
+    resources  = ["pods"]
+    verbs      = ["delete"]
+  }
+
   rule {
     api_groups = [""]
     resources  = ["pods/log"]
