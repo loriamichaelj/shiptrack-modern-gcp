@@ -31,16 +31,20 @@ jobs:
         env:
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
         run: |
+          set -euo pipefail
           echo "::add-mask::$GCP_PROJECT_NUMBER"
           bucket="shiptrack-tfstate-${GCP_PROJECT_NUMBER}"
           echo "::add-mask::$bucket"
+          # Only the object name, version, and times are kept from each listing entry; the bucket is not printed.
+          versions=$(gcloud storage ls -a --json "gs://${bucket}/gcp/**" \
+            | jq -r '[.[] | .metadata | select(.name | endswith(".tfstate")) | {name, generation, timeCreated, live: (.timeDeleted == null)}]
+                     | group_by(.name) | map(sort_by(.timeCreated) | reverse)[][]
+                     | "| \(.name) | \(.generation) | \(.timeCreated[0:19] | sub("T"; " ")) | \(if .live then "live" else "older" end) |"')
+          [[ -n "$versions" ]] || { echo "::error::no state object was listed"; exit 1; }
           {
             echo "## Terraform state versions"
             echo
             echo "| Object | Version | Saved (UTC) | State |"
             echo "|---|---|---|---|"
-            gcloud storage objects list "gs://${bucket}/gcp/**" --all-versions \
-              --format='csv[no-heading,separator="|"](name,generation,timeCreated,timeDeleted)' \
-              | sort -t'|' -k1,1 -k2,2r \
-              | awk -F'|' '{ state = ($4 == "") ? "live" : "older"; printf "| %s | %s | %s | %s |\n", $1, $2, $3, state }'
+            echo "$versions"
           } | tee -a "$GITHUB_STEP_SUMMARY"

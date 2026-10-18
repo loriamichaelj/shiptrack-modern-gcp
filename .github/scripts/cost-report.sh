@@ -8,7 +8,7 @@
 #
 # Environment:
 #   GCP_PROJECT_ID   project that the export covers (required)
-#   BUDGET_USD       monthly budget to compare with (default 50, as terraform/finops)
+#   BUDGET_USD       monthly budget to compare with (default 75, as terraform/finops)
 #   GCP_PROJECT_NUMBER  optional; also hidden from error text
 #   GCP_REGION       location of the export dataset (default us-central1)
 set -euo pipefail
@@ -16,7 +16,7 @@ set -euo pipefail
 : "${GCP_PROJECT_ID:?GCP_PROJECT_ID is required}"
 month=${1:-$(date -u +%Y-%m)}
 [[ "$month" =~ ^[0-9]{4}-(0[1-9]|1[0-2])$ ]] || { echo "month must be YYYY-MM" >&2; exit 2; }
-budget=${BUDGET_USD:-50}
+budget=${BUDGET_USD:-75}
 dataset=shiptrack_billing_export
 echo "::add-mask::$GCP_PROJECT_ID"
 
