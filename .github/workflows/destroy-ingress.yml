@@ -53,6 +53,7 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_ALERT_EMAIL: ${{ secrets.GCP_ALERT_EMAIL }}
         run: |
           # shellcheck disable=SC2086 # TARGETS is a list of addresses separated by spaces
           .github/scripts/terraform-destroy.sh data plan ingress $TARGETS
@@ -84,6 +85,7 @@ jobs:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_ALERT_EMAIL: ${{ secrets.GCP_ALERT_EMAIL }}
         run: |
           # shellcheck disable=SC2086 # TARGETS is a list of addresses separated by spaces
           .github/scripts/terraform-destroy.sh data destroy ingress $TARGETS

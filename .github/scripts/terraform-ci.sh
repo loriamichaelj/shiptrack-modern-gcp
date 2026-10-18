@@ -20,7 +20,7 @@
 #   GCP_PROJECT_NUMBER   its number; part of the state bucket's name (required)
 #   GCP_REGION           region (default us-central1)
 #   GCP_BILLING_ACCOUNT_ID  billing account of the project (required for finops)
-#   GCP_ALERT_EMAIL         address for budget alerts (required for finops)
+#   GCP_ALERT_EMAIL         address for budget and monitoring alerts (required for finops and data)
 #   SUMMARY_FILE         optional; the summary is also appended here, for the pull request comment
 set -euo pipefail
 
@@ -33,10 +33,12 @@ mode=${2:?usage: terraform-ci.sh <root> plan|apply}
 
 if [[ "$root" == finops ]]; then
   : "${GCP_BILLING_ACCOUNT_ID:?GCP_BILLING_ACCOUNT_ID is required for finops}"
-  : "${GCP_ALERT_EMAIL:?GCP_ALERT_EMAIL is required for finops}"
   export TF_VAR_billing_account_id=$GCP_BILLING_ACCOUNT_ID
-  export TF_VAR_alert_email=$GCP_ALERT_EMAIL
   echo "::add-mask::$GCP_BILLING_ACCOUNT_ID"
+fi
+if [[ "$root" == finops || "$root" == data ]]; then
+  : "${GCP_ALERT_EMAIL:?GCP_ALERT_EMAIL is required for finops and data}"
+  export TF_VAR_alert_email=$GCP_ALERT_EMAIL
   echo "::add-mask::$GCP_ALERT_EMAIL"
 fi
 export TF_VAR_project_id=$GCP_PROJECT_ID

@@ -401,9 +401,10 @@ Each runs as `shiptrack-apply` in the `dev` environment with two approvals, plan
 | notify-dlq-visible | the same for notifications | SEV2 |
 | pod-restarts | container restarts in the `shiptrack` namespace above 3 in 10 min | SEV2 |
 | sla-scan-heartbeat | a log-based metric on `sla_scan_completed` absent for 15 min | SEV2 |
-| availability-fast-burn | 5xx ratio burn over 1 h and 5 min, PromQL **[VERIFY PromQL alert policies]** | SEV1 |
+| availability-fast-burn | 5xx ratio burn above 14.4 times the error budget over 1 h and 5 min, PromQL **[VERIFY PromQL alert policies]** | SEV1 |
+| availability-slow-burn | the same above 6 times over 6 h and 30 min | SEV2 |
 
-- **Dashboard:** one Cloud Monitoring dashboard from Terraform: request rate, errors, latency, subscription depth and age, pod restarts, database connections.
+- **Dashboard:** one Cloud Monitoring dashboard from Terraform: request rate, errors, latency, subscription depth and age, pod restarts, database connections. Alerts, channel, heartbeat metric, and dashboard are the `monitoring` module of the `data` root (ADR-0032); each alert names a runbook in `docs/runbooks/`.
 - SLO targets are those of modern §11.1; the latency and freshness SLOs are read from the histograms.
 
 ---
