@@ -1,0 +1,60 @@
+name: ops-check-logs
+
+# Counts the error and warning records in the application's pod logs, by event and by the last line of its
+# exception, for each workload (runbooks docs/runbooks). It reads the logs of the pods that exist now and prints
+# counts only: no message body, no request data, and any address is replaced. It changes nothing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "How far back to look, in minutes"
+        required: false
+        default: "30"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+      - name: Count the errors
+        env:
+          MINUTES: ${{ inputs.minutes }}
+        run: |
+          [[ "$MINUTES" =~ ^[0-9]{1,4}$ ]] || { echo "minutes must be a number" >&2; exit 2; }
+          for component in api worker-events worker-notify sla-scan; do
+            echo "== ${component}, last ${MINUTES} minutes"
+            pods=$(kubectl -n shiptrack get pods -l "app.kubernetes.io/component=${component}" -o name)
+            [[ -n "$pods" ]] || { echo "  no pods"; continue; }
+            for pod in $pods; do
+              echo "  ${pod#pod/}: $(kubectl -n shiptrack get "$pod" -o jsonpath='{.status.phase}, started {.status.startTime}')"
+              kubectl -n shiptrack logs "$pod" --since="${MINUTES}m" 2>/dev/null \
+                | jq -R -r 'fromjson? | select(.level == "error" or .level == "warning" or .level == "critical")
+                    | "\(.level) \(.event) | \((.exception // "") | split("\n") | map(select(length > 0)) | last // "" | .[0:150])"' \
+                | sed -E 's/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/<IP>/g' | sort | uniq -c | sort -rn | head -8 | sed 's/^/    /'
+            done
+          done
