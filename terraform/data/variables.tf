@@ -45,7 +45,7 @@ variable "deletion_protection" {
 variable "db_credentials_version" {
   description = "Raise to generate and write new database passwords. They are write-only, so Terraform sends them only when this changes."
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "project_number" {
