@@ -22,4 +22,6 @@ summary and the `publish-ghcr` job show it), and approve the `dev` environment. 
 be pulled, runs the db-init Job, installs the chart with `--atomic`, waits for every Deployment, runs the
 contract smoke suite through a port-forward, and rolls back to the previous revision if that fails. While Helm
 waits, `scripts/sample-rollout.sh` prints the pods, events, and the log of any pod that is not ready, because
-an atomic install removes them when it fails. `ops-contract` runs the full contract suite the same way.
+an atomic install removes them when it fails. `ops-contract` runs the full contract suite the same way. `ops-validate` runs the carrier simulator through a
+port-forward while the pods are restarted or deleted, and checks that no accepted event was lost (`deploy`,
+`preemption`), or runs `validation/sla-check.yaml` in the cluster to check one alert per breached shipment (`sla`).

@@ -334,6 +334,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | `destroy-*` | dispatch with a confirmation | Takes down one cost-bearing resource group (§9.4) |
 | `deploy-app` | dispatch with a digest | Deploy (below) |
 | `ops-contract` | dispatch | Contract suite through a port-forward (§9.3) |
+| `ops-validate` | dispatch with a scenario | Event-loss, preemption, and SLA checks (§9.3) |
 
 `deploy-app`:
 1. `environment: dev` (the user approves); `concurrency: deploy-dev` without cancel.
@@ -352,6 +353,11 @@ The platform contract suite reads `BASE_URL`, `TARGET`, `TEST_TOKEN`, and `SINGL
 - `SINGLE_STACK=1`.
 
 The suite needs no change. `ops-contract` runs it from a GitHub-hosted runner with no inbound path to the cluster (ADR-0020).
+
+`ops-validate` (ADR-0033) takes the carrier simulator from `shiptrack-platform` and runs it through the same port-forward, which it restarts whenever the pod it points at is replaced. Its ledger records every event the API accepted (202). The `verify` step then looks each one up in its shipment's tracking timeline for up to five minutes, and any event that was accepted and never stored fails the run. A request that fails while a pod goes is an availability blip, reported but not a loss. Scenarios:
+- `deploy`: traffic for about 30 s, then a restart of every Deployment at once, as a release does.
+- `preemption`: traffic, then every api and worker pod deleted with the 25 s grace Autopilot gives a Spot pod, twice. A real reclaim cannot be forced; this is the pod's side of one.
+- `sla`: shipments created already late, then a Job in the cluster (`deploy/validation/sla-check.yaml`) waits for the scan to flag every overdue shipment and fails unless each breached shipment has exactly one `sla_alerts` row.
 
 ### 9.4 Destroy workflows
 Every pull request that provisions a cost-bearing resource also adds its destroy workflow (ADR-0027). They stop spend one group at a time:

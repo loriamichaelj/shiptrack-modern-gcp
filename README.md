@@ -50,7 +50,7 @@ export), which is separate so that taking the others down keeps the cost history
 | `terraform/finops/` | The monthly budget with alerts, and the dataset for the billing export |
 | `deploy/` | The Helm values, the pinned chart commit, the db-init Job, and `gateway/`, the objects of the UI's load balancer |
 | `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, ui-ingress, gke-autopilot, workload-access |
-| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, `ops-contract`, `ops-ui-port`, `ops-check-cluster`, and `ops-check-cost` |
+| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, `ops-contract`, `ops-validate`, `ops-ui-port`, `ops-check-cluster`, and `ops-check-cost` |
 | `scripts/` | The chart arguments, the connection budget check, the rollout sampler, the contract run through a port-forward, and `ui-access.sh`, which opens and closes the browser URL from your machine |
 | `.github/scripts/` | The plan, apply, and destroy wrappers, which print addresses and actions only, and the cost report |
 
@@ -64,9 +64,11 @@ export), which is separate so that taking the others down keeps the cost history
 | Data, cluster, and add-ons | Done and applied; the deploy account reaches the cluster and only its own namespace |
 | FinOps | Done: the budget alerts, the cost export, and `ops-check-cost` |
 | Workflows | All built |
-| First release | `deploy-app` has run: db-init, the migration, the Helm install, and the contract smoke suite passed on the first dispatch. The full contract suite (`ops-contract`) is built and has not run |
+| First release | `deploy-app` has run: db-init, the migration, the Helm install, and the contract smoke suite passed on the first dispatch. The full contract suite (`ops-contract`) then passed |
 | Deploy files | Built: the Helm values, the pinned chart, the db-init Job, and a pull request check that renders and scans them |
-| Validation and operations | Not started: the full contract run, the event-loss and preemption tests, the SLA check, and the cost analysis |
+| Monitoring | Built: alert policies, the notification channel, and a dashboard in the `data` root; `destroy-monitoring` |
+| Validation | Built: `ops-validate` (event loss across a deploy and a pod reclaim, and the SLA alert check). Not run yet |
+| Operations | Not started: the cost analysis, the runbooks, and a run of each destroy workflow |
 
 ## Opening the UI in a browser
 

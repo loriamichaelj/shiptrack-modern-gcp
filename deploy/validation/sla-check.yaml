@@ -1,0 +1,121 @@
+# Counts the SLA alerts against the breached shipments, from the release's own image (ADR-0033). The database is
+# private, so a runner cannot query it; this Job reads it with the application's credentials, through the
+# db-init service account, and prints counts only. ops-validate fills in ${IMAGE} and ${GCP_PROJECT_ID}
+# with envsubst and creates the Job with `kubectl create`; the name is generated.
+#
+# It waits (up to 900 seconds) for the scan to flag every overdue shipment, then fails unless every breached
+# shipment has exactly one alert. It reads and writes nothing else.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: shiptrack-sla-check-
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: sla-check
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1500
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shiptrack
+        app.kubernetes.io/component: sla-check
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shiptrack-db-init
+      automountServiceAccountToken: false
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sla-check
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -c
+            - |
+              import sys
+              import time
+
+              import psycopg
+
+              from shiptrack.cloud import build_secret_cache
+              from shiptrack.config import load_settings
+
+              WAIT_SECONDS = 900
+              QUERY = """
+              SELECT
+                count(*) FILTER (WHERE s.sla_breached) AS breached,
+                count(*) FILTER (WHERE s.sla_breached AND a.n = 0) AS without_alert,
+                count(*) FILTER (WHERE a.n > 1) AS with_several,
+                count(*) FILTER (WHERE NOT s.sla_breached AND s.status <> 'DELIVERED'
+                                 AND s.promised_delivery_at < now()) AS waiting_for_scan
+              FROM shiptrack.shipments s
+              CROSS JOIN LATERAL (
+                SELECT count(*) AS n FROM shiptrack.sla_alerts x WHERE x.shipment_id = s.id
+              ) a
+              """
+
+              settings = load_settings()
+              creds = build_secret_cache(settings).get(settings.require_db_secret())
+              deadline = time.monotonic() + WAIT_SECONDS
+              while True:
+                  with psycopg.connect(
+                      host=creds.host, port=creds.port, dbname=creds.dbname,
+                      user=creds.username, password=creds.password,
+                      sslmode=settings.db_sslmode, connect_timeout=10,
+                  ) as connection:
+                      breached, without_alert, with_several, waiting = connection.execute(QUERY).fetchone()
+                  print(f"breached={breached} without_alert={without_alert} "
+                        f"with_several_alerts={with_several} waiting_for_scan={waiting}", flush=True)
+                  if waiting == 0 or time.monotonic() > deadline:
+                      break
+                  time.sleep(30)
+
+              problems = []
+              if breached == 0:
+                  problems.append("no shipment is breached, so there is nothing to check")
+              if waiting:
+                  problems.append(f"{waiting} overdue shipment(s) were not flagged within {WAIT_SECONDS} s")
+              if without_alert:
+                  problems.append(f"{without_alert} breached shipment(s) have no alert")
+              if with_several:
+                  problems.append(f"{with_several} shipment(s) have more than one alert")
+              print("FAIL: " + "; ".join(problems) if problems else "ok: exactly one alert per breached shipment")
+              sys.exit(1 if problems else 0)
+          env:
+            - name: SHIPTRACK_CLOUD
+              value: "gcp"
+            - name: SHIPTRACK_GCP_PROJECT
+              value: "${GCP_PROJECT_ID}"
+            - name: SHIPTRACK_DB_SECRET_NAME
+              value: "shiptrack-db-app"
+            - name: SHIPTRACK_LOG_LEVEL
+              value: "WARNING"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
