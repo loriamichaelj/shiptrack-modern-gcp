@@ -286,7 +286,7 @@ The workflow reads these from GitHub: secrets `GCP_PROJECT_ID`, `GCP_PROJECT_NUM
 | Resource | Notes |
 |---|---|
 | VPC | Custom mode, one subnet in `us-central1` with secondary ranges for pods and services sized for one or two nodes, Private Google Access on, flow logs off (cost) |
-| Cloud NAT and router | One gateway, automatic IP allocation, logging errors only |
+| Cloud NAT and router | One gateway with one reserved, labelled external address (ADR-0035), logging errors only |
 | Private services access | An allocated range and peering for Cloud SQL |
 | Cloud SQL | PostgreSQL 17, `edition = ENTERPRISE` set explicitly, tier `db-f1-micro`, zonal, 10 GiB, private IP only, `ssl_mode = ENCRYPTED_ONLY`, daily backups kept 7 days, point-in-time recovery off, deletion protection on, database `shiptrack` (ADR-0008). The administrator password uses a write-only argument **[VERIFY]** |
 | Pub/Sub | Topic `shiptrack-carrier-events` with a pull subscription (ack deadline 60 s, retention 4 d, dead-letter after 5 attempts) and a dead-letter topic with a pull subscription (retention 14 d). Topic `shiptrack-notifications` (retention 7 d) with a subscription filtered on `detail_type`, with the same dead-letter setup. The Pub/Sub service agent gets publisher on each dead-letter topic and subscriber on each source subscription |
@@ -369,7 +369,7 @@ Every pull request that provisions a cost-bearing resource also adds its destroy
 | `destroy-addons` | Namespace, deploy RBAC, Gateway |
 | `destroy-cluster` | GKE Autopilot cluster |
 | `destroy-cloud-sql` | Cloud SQL instance, database, users |
-| `destroy-network` | VPC, subnet, router, Cloud NAT, private services access |
+| `destroy-network` | VPC, subnet, router, Cloud NAT and its address, private services access |
 | `destroy-pubsub` | Topics, subscriptions, dead-letter topics |
 | `destroy-proof-of-delivery-storage` | The proof-of-delivery bucket |
 | `destroy-secrets` | Secret Manager secrets |

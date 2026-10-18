@@ -28,3 +28,8 @@ variable "private_services_prefix_length" {
   description = "Prefix length of the range that Google allocates to Cloud SQL (private services access)."
   type        = number
 }
+
+variable "labels" {
+  description = "Labels for every resource of the module that takes them."
+  type        = map(string)
+}

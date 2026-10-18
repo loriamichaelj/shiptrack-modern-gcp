@@ -31,3 +31,8 @@ variable "closed_range" {
   type        = string
   default     = "192.0.2.1/32"
 }
+
+variable "labels" {
+  description = "Labels for every resource of the module that takes them. The regional Cloud Armor policy and its rules have none (ADR-0035)."
+  type        = map(string)
+}

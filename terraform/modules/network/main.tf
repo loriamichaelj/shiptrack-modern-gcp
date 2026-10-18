@@ -37,13 +37,24 @@ resource "google_compute_router" "this" {
   network = google_compute_network.this.id
 }
 
-# One gateway with addresses Google allocates. Logging is limited to errors (cost).
+# The gateway's external address. Cloud NAT can allocate one itself, but an address it allocates cannot be
+# labelled, so one is reserved here (ADR-0035).
+resource "google_compute_address" "nat" {
+  project      = var.project_id
+  name         = "shiptrack-nat"
+  region       = var.region
+  address_type = "EXTERNAL"
+  labels       = var.labels
+}
+
+# One gateway with the address above. Logging is limited to errors (cost).
 resource "google_compute_router_nat" "this" {
   project                            = var.project_id
   name                               = "shiptrack"
   router                             = google_compute_router.this.name
   region                             = var.region
-  nat_ip_allocate_option             = "AUTO_ONLY"
+  nat_ip_allocate_option             = "MANUAL_ONLY"
+  nat_ips                            = [google_compute_address.nat.self_link]
   source_subnetwork_ip_ranges_to_nat = "ALL_SUBNETWORKS_ALL_IP_RANGES"
 
   log_config {
@@ -61,6 +72,7 @@ resource "google_compute_global_address" "private_services" {
   address_type  = "INTERNAL"
   prefix_length = var.private_services_prefix_length
   network       = google_compute_network.this.id
+  labels        = var.labels
 }
 
 resource "google_service_networking_connection" "private_services" {
