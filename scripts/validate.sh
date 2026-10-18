@@ -20,7 +20,8 @@
 #
 # Environment: NAMESPACE (default shiptrack), SERVICE (default shiptrack-api), LOCAL_PORT (default 18000),
 # SHIPMENTS (300), CONCURRENCY (10), DELAY (3, seconds between a shipment's events), SEED (1),
-# RETRY_SECONDS (180, how long the simulator tries a failed request again),
+# RETRY_SECONDS (180, how long the simulator tries a failed request again), MAX_RUN_SECONDS (1200, how long
+# the simulator may run before the run is stopped and fails; a healthy run of 300 shipments takes about 6 minutes),
 # GCP_PROJECT_ID (required). Needs kubectl with credentials for the cluster, curl, and uv.
 set -euo pipefail
 
@@ -40,14 +41,27 @@ concurrency=${CONCURRENCY:-10}
 delay=${DELAY:-3}
 seed=${SEED:-1}
 retry=${RETRY_SECONDS:-180}
+max_run=${MAX_RUN_SECONDS:-1200}
 base="http://localhost:${port}"
 results="$PWD/validation-results"
 mkdir -p "$results"
 sim_log="$results/run.log"
 
+# A port-forward ends when its pod goes, and one that is still running can point at a pod that is gone and answer
+# nothing. So the tunnel is probed every 3 seconds, and one that fails five probes in a row is stopped and started again.
 forward_forever() {
+  local forward fails
   while true; do
-    kubectl -n "$namespace" port-forward "svc/${service}" "${port}:8000" >/dev/null 2>&1 || true
+    kubectl -n "$namespace" port-forward "svc/${service}" "${port}:8000" >/dev/null 2>&1 &
+    forward=$!
+    fails=0
+    while kill -0 "$forward" 2>/dev/null; do
+      sleep 3
+      if curl -s -o /dev/null -m 3 "${base}/healthz"; then fails=0; else fails=$((fails + 1)); fi
+      if ((fails >= 5)); then kill "$forward" 2>/dev/null || true; break; fi
+    done
+    wait "$forward" 2>/dev/null || true
+    echo restarted >>"$results/forward-restarts"
     sleep 1
   done
 }
@@ -76,10 +90,37 @@ start_traffic() {
   sim_pid=$!
 }
 
+# One line of progress: how long the run has lasted, how many events the API has accepted so far, how many times
+# the port-forward had to be restarted, and whether the tunnel answers now.
+progress() {
+  local ledger="" candidate accepted=0 restarts=0 probe
+  for candidate in "$results"/sent-*.jsonl; do
+    [[ -e "$candidate" ]] && ledger=$candidate
+  done
+  [[ -n "$ledger" ]] && accepted=$(wc -l <"$ledger" | tr -d ' ')
+  [[ -e "$results/forward-restarts" ]] && restarts=$(wc -l <"$results/forward-restarts" | tr -d ' ')
+  probe=$(curl -s -o /dev/null -m 3 -w '%{http_code}' "${base}/readyz" 2>/dev/null || true)
+  echo "progress: ${SECONDS}s, ${accepted} events accepted, port-forward restarted ${restarts} time(s), /readyz through the tunnel: ${probe:-no answer}"
+}
+
 # Waits for the simulator and prints what it did. A non-zero exit means some shipment could not be created
 # or sent while the pods were being replaced; the ledger check below is what decides the result.
 finish_traffic() {
-  local status=0
+  local status=0 waited=0
+  while kill -0 "$sim_pid" 2>/dev/null; do
+    sleep 15
+    waited=$((waited + 15))
+    if ((waited % 30 == 0)); then progress; fi
+    if ((waited >= max_run)); then
+      echo "::error::the simulator was still running after ${max_run} s, so it is stopped"
+      progress
+      kill "$sim_pid" 2>/dev/null || true
+      pkill -f shiptrack-sim 2>/dev/null || true
+      sim_pid=""
+      cat "$sim_log"
+      exit 1
+    fi
+  done
   wait "$sim_pid" || status=$?
   sim_pid=""
   cat "$sim_log"
@@ -142,6 +183,7 @@ case "$scenario" in
     echo "restarting every Deployment at once, as a release does"
     kubectl -n "$namespace" rollout restart deployment
     wait_ready
+    progress
     finish_traffic
     check_ledger
     ;;
@@ -155,6 +197,7 @@ case "$scenario" in
       # The old pods linger for the grace period, so wait it out before asking whether the new ones are ready.
       sleep 30
       wait_ready
+      progress
     done
     finish_traffic
     check_ledger
