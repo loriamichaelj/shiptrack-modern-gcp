@@ -82,6 +82,7 @@ jobs:
         env:
           CONFIRM: ${{ inputs.confirm }}
           UNPROTECT_VAR: deletion_protection
+          UNPROTECT_TARGETS: module.gke_autopilot
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
@@ -90,6 +91,7 @@ jobs:
         env:
           CONFIRM: ${{ inputs.confirm }}
           UNPROTECT_VAR: deletion_protection proof_of_delivery_protection
+          UNPROTECT_TARGETS: module.cloud_sql module.proof_of_delivery_storage
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
@@ -198,6 +200,7 @@ jobs:
         env:
           CONFIRM: ${{ inputs.confirm }}
           UNPROTECT_VAR: deletion_protection
+          UNPROTECT_TARGETS: module.gke_autopilot
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
