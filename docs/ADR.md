@@ -41,6 +41,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0035 | `every resource that can carry the labels does` | Accepted |
 | 0036 | `data-reset-by-gated-workflow` | Accepted |
 | 0037 | `features-arrive-in-the-shared-image` | Accepted |
+| 0038 | `one-command-follows-the-owners-address` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -487,3 +488,17 @@ The monthly budget moves from $50 to $75 (ADR-0028), because the baseline of abo
 - `ops-contract` keeps running the platform suite unedited. It proves the legacy contract on GCP. Modern's own tests cover the additions.
 
 **Consequences:** GCP runs the previous release from the moment AWS deploys a new digest until `deploy-app` is dispatched here, so the two clouds can briefly serve different UIs. A feature that needs a GCP resource takes two approvals: the apply, then the deploy. Because GCP has its own database and no legacy fallback, the expand-only schema rule matters less here, but the migrations are shared and follow it anyway.
+
+## ADR-0038: one-command-follows-the-owners-address
+
+**Status:** Accepted
+
+**Context:** The owner opens four pages in a browser: modern on the AWS main address, legacy on the AWS preview port, Grafana on the AWS Grafana port, and the GCP UI. Three of them admit only the owner's address: the GCP Cloud Armor rule (ADR-0031) and the platform's preview and Grafana listeners (platform ADR-0026, ADR-0035). When the owner's address changes, all three break. The owner asked for one workflow that takes the new address and shows the URLs in GitHub Actions. A workflow runs on a GitHub runner and cannot see the owner's address, and the repositories are public: an input, a log line, and a job summary are all public, and the URLs must never appear in one (ADR-0031, platform design §6.12). The owner chose ciphertext in Actions, decrypted on the owner's machine, and both clouds in one command.
+
+**Decision:**
+- `scripts/ui-access.sh open`, on the owner's machine, reads the public address and writes it to this repository's `GCP_UI_ALLOWED_CIDRS` and the platform's `PREVIEW_CIDRS`, with the owner's `gh` login. It makes an RSA key pair for the run and dispatches `ops-ui-port open` here, the platform's `apply-terraform`, and the platform's `check-ui-urls` (platform ADR-0037), passing the public key. It follows each run to the end, decrypts the `UI_URL` lines in their logs, checks that each URL answers 200 (Grafana on `/api/health`), and prints the four URLs with their state. The private key is deleted when the script exits.
+- `ops-ui-port` takes an optional `public_key`. When one is given, it prints `UI_URL gcp <ciphertext>`, the reserved address's URL encrypted with RSA-OAEP (SHA-256).
+- The platform's apply is not dispatched while the platform's drift issue is open, because it would apply the drift with the address change.
+- `urls` prints and checks the four URLs without changing anything. `ip` sets both secrets and does nothing else.
+
+**Consequences:** One command and two approvals move every allow-list to a new address and confirm the pages load. Nothing readable reaches a public log: the address is in secrets, and the URLs are ciphertext that only the run's key can read. `open` replaces `PREVIEW_CIDRS` with the one current address. `urls` also needs an approval, because `ops-ui-port` runs only in the `dev` environment. The platform's plan is made and applied in one approved job, so the drift guard is what keeps anything other than `preview["0"]` and `grafana["0"]` out of it. The script needs `gh`, `curl`, and OpenSSL 3; macOS's own `openssl` is LibreSSL and is refused.

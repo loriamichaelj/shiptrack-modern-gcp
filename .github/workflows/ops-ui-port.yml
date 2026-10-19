@@ -9,6 +9,10 @@ name: ops-ui-port
 #   open    admits the ranges in the secret, then creates the load balancer if it is not there
 #   close   admits nobody (the allow rule holds an unroutable address); the load balancer is still billed
 #   remove  closes the port and deletes the load balancer, which stops its charge
+#
+# With `public_key` (the base64 of an RSA public key in PEM form, made by scripts/ui-access.sh), it also prints
+# the URL as `UI_URL gcp <base64 ciphertext>`, encrypted to that key, so the public log never holds the address
+# (ADR-0038).
 
 on:
   workflow_dispatch:
@@ -22,6 +26,11 @@ on:
           - open
           - close
           - remove
+      public_key:
+        description: "Optional: base64 of an RSA public key; the URL is printed encrypted to it"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -102,6 +111,27 @@ jobs:
             exit 1
           fi
           if [[ "$ACTION" == open ]]; then echo "The allow rule admits the ranges in the secret."; else echo "The allow rule admits nobody."; fi
+
+      # The address is Terraform's reserved one (ADR-0031), so it is known before the load balancer exists.
+      - name: Print the URL, encrypted
+        if: inputs.public_key != ''
+        env:
+          PUBLIC_KEY: ${{ inputs.public_key }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          if ! printf '%s' "$PUBLIC_KEY" | base64 -d >"$RUNNER_TEMP/key.pem" 2>/dev/null \
+            || ! openssl pkey -pubin -in "$RUNNER_TEMP/key.pem" -noout 2>/dev/null; then
+            echo "::error::public_key is not the base64 of a PEM public key"
+            exit 1
+          fi
+          address=$(gcloud compute addresses describe shiptrack-ui --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --format='value(address)')
+          echo "::add-mask::$address"
+          printf 'http://%s/ui/' "$address" \
+            | openssl pkeyutl -encrypt -pubin -inkey "$RUNNER_TEMP/key.pem" -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 \
+            | base64 -w0 | sed 's/^/UI_URL gcp /'
+          echo
 
       # The load balancer is Kubernetes objects, so the rest runs as the deploy account.
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
