@@ -8,6 +8,7 @@ What `deploy-app` needs to put a release on the cluster. Nothing here names the 
 | `chart-ref` | The commit of `shiptrack-modern` whose chart is deployed. Change it in a pull request to move to a newer chart |
 | `gateway/` | The UI's load balancer: the Gateway, its route, the health check, the backend policy that attaches Cloud Armor, and the network policy that admits it. Applied and deleted by `ops-ui-port`, never by `deploy-app` |
 | `db-init/` | The service account and the Job that create the application's database roles and schema, from the release's own image |
+| `reset-data/` | The Job and script `ops-reset-data` runs to delete every shipment and its proof-of-delivery files and seed five demo shipments, and the schema `scripts/test-reset-data.sh` tests it against |
 
 The image digest, the project, the proof-of-delivery bucket, and the signer's email are passed with `--set` by
 `scripts/chart-args.sh`. `deploy-app` takes the project and the bucket from the `GCP_PROJECT_ID` and

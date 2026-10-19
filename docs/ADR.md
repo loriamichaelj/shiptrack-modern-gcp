@@ -35,6 +35,11 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0029 | `workload-bindings-follow-the-cluster` | Accepted |
 | 0030 | `db-init-runs-the-app-image` | Accepted |
 | 0031 | `ui-url-through-a-regional-load-balancer` | Accepted |
+| 0032 | `monitoring-in-the-data-root` | Accepted |
+| 0033 | `validation-through-the-port-forward` | Accepted |
+| 0034 | `dead-letter-and-state-operations-by-workflow` | Accepted |
+| 0035 | `every resource that can carry the labels does` | Accepted |
+| 0036 | `data-reset-by-gated-workflow` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -448,3 +453,19 @@ The monthly budget moves from $50 to $75 (ADR-0028), because the baseline of abo
 **Decision:** The network and `ui-ingress` modules take a `labels` variable and set it on the two addresses. The NAT gateway uses a reserved external address, `shiptrack-nat`, labelled the same way, with `nat_ip_allocate_option = "MANUAL_ONLY"`, in place of the address Google allocates; it is part of the network module, so `destroy-network` removes it. The Cloud Armor policy and the Gateway's forwarding rule are recorded as exceptions: no supported way to label them exists, and both are covered by the project's tags and by being created from `deploy/gateway` and the `ui-ingress` module.
 
 **Consequences:** The NAT's outbound address changes once when this applies; nothing depends on it, because no allow-list holds it. A reserved external address in use costs the same as the one Cloud NAT allocated, about $0.005 per hour **[VERIFY]**. If the provider adds labels to the regional security policy, or GKE to the Gateway's load balancer, they should be set and the exceptions removed. Resources that have no labels in Google Cloud (service accounts, the network, subnets, the router, firewall rules, log-based metrics) are not subject to the rule.
+
+## ADR-0036: data-reset-by-gated-workflow
+
+**Status:** Accepted
+
+**Context:** Synthetic traffic, `ops-validate`, and the contract suite create shipments that nothing deletes, because the API has no delete. The UI's Live and Browse pages read every shipment, so the data only grows. On AWS, the platform's `ops-reset-data` clears it (platform ADR-0034). That reset runs on a legacy host over SSM. GCP has its own database and no hosts. The owner asked for the same workflow here.
+
+**Decision:**
+- `ops-reset-data` takes the same inputs as the platform's: `confirm`, which must be exactly `delete-all-shipments`, and `seed_demo`. It runs from `dev` only, behind the `dev` environment's reviewer, as `shiptrack-deploy`, in the `deploy-dev` concurrency group, so it never races a deploy.
+- The executor is a Job in the cluster (`deploy/reset-data/job.yaml`), because the database is private and the cluster is the one place a workflow reaches it from (as with `ledger-check`, ADR-0033). The Job runs the image the api runs. `scripts/reset-data.sh` puts `deploy/reset-data/reset_data.py` in a ConfigMap for it, so a change to the reset needs no release of `shiptrack-modern`.
+- The Job runs as the api's Kubernetes service account. That account already reads the application's database secret and reads and writes the proof-of-delivery bucket, which is everything the reset needs, so the reset adds no binding and no apply. The cost is that a deletion appears in the audit logs as the api's principal.
+- The work is the platform's: the same tables in the same order (alerts, documents, events, shipments) in one transaction as the application role, and the same seed statement and five tracking numbers. After that it removes the objects under `proof-of-delivery/` in the bucket, and a failure in the database leaves them alone. Carriers and the schema are kept.
+- The output is the platform's lines (`RESET_DATA deleted …`, `RESET_DATA now …`, `SEEDED …`) plus `RESET_DATA objects_removed=<n>`. When the run fails, the end of the Job's log is shown with any host or address withheld.
+- `scripts/test-reset-data.sh` runs the reset as the application role against PostgreSQL 17 in a container with the tables of modern's migration, using the same checks as the platform's test. The `reset-data` job of `ci-checks` runs it. The schema file mirrors the migration by hand, as the platform's does.
+
+**Consequences:** It is the only thing on GCP that deletes shipments, it cannot be undone, and it needs a person to approve it. Events still waiting in the events subscription for shipments that are gone fail to apply and end in the dead-letter subscription, which alerts. The workflow says to stop traffic and check `ops-queues status` first, and nothing checks it. The bucket has versioning off and Google's default soft-delete window of seven days (read from the live bucket; Terraform sets no policy), so a removed document can be restored for a week and is then gone. A schema change in `shiptrack-modern` that touches these tables needs the test schema updated by hand. The AWS data is untouched; the platform's workflow resets it.

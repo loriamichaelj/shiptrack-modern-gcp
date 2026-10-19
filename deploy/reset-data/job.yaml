@@ -1,0 +1,83 @@
+# Deletes every shipment and its proof-of-delivery files, and optionally seeds five demo shipments, from the
+# release's own image (ADR-0036). The script is deploy/reset-data/reset_data.py, which scripts/reset-data.sh puts
+# in the ConfigMap ${RESET_CONFIGMAP}. It runs as the api's Kubernetes service account, which already reads the
+# application's database secret and reads and writes the proof-of-delivery bucket, so it needs no new
+# permission. scripts/reset-data.sh fills in ${IMAGE}, ${GCP_PROJECT_ID}, ${RESET_CONFIGMAP}, ${RESET_SEED}, and
+# ${GCP_PROOF_OF_DELIVERY_BUCKET} with envsubst and creates the Job with `kubectl create`; the name is generated.
+# It prints counts and the five synthetic tracking numbers only.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: shiptrack-reset-data-
+  namespace: shiptrack
+  labels:
+    app.kubernetes.io/name: shiptrack
+    app.kubernetes.io/component: reset-data
+spec:
+  # A second attempt after a partial run would delete the five demo shipments it had just seeded; a person
+  # reads the output and runs it again instead.
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: shiptrack
+        app.kubernetes.io/component: reset-data
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shiptrack-api
+      automountServiceAccountToken: false
+      nodeSelector:
+        cloud.google.com/gke-spot: "true"
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: reset-data
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "/reset/reset_data.py"]
+          env:
+            - name: RESET_CONFIRM
+              value: "delete-all-shipments"
+            - name: RESET_SEED
+              value: "${RESET_SEED}"
+            - name: RESET_BUCKET
+              value: "${GCP_PROOF_OF_DELIVERY_BUCKET}"
+            - name: SHIPTRACK_CLOUD
+              value: "gcp"
+            - name: SHIPTRACK_GCP_PROJECT
+              value: "${GCP_PROJECT_ID}"
+            - name: SHIPTRACK_DB_SECRET_NAME
+              value: "shiptrack-db-app"
+            - name: SHIPTRACK_LOG_LEVEL
+              value: "WARNING"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: reset
+              mountPath: /reset
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: reset
+          configMap:
+            name: ${RESET_CONFIGMAP}

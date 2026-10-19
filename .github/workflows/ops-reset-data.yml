@@ -1,0 +1,91 @@
+name: ops-reset-data
+
+# Deletes every shipment, its events, its proof-of-delivery records, and its SLA alerts from the database,
+# removes the proof-of-delivery files from the bucket, and optionally seeds five demo shipments
+# (MF0000000001 to MF0000000005) that can be looked up by hand. Carriers and the schema are kept. It cannot be
+# undone (ADR-0036). The same reset as the platform's ops-reset-data, for the GCP database.
+#
+# Before running it: stop the live traffic (the Live page's Stop, and any ops-validate run), and let the events
+# subscription drain (ops-queues status). An event for a shipment that is gone cannot be applied; it is retried
+# and ends in the dead-letter subscription, which alerts.
+#
+# It runs deploy/reset-data/job.yaml in the cluster from the image the api runs, behind the `dev` environment's
+# reviewer, and refuses unless `confirm` is exactly delete-all-shipments. It shares deploy-app's concurrency
+# group, so it never races a deploy. The output is lines of numbers and the five synthetic tracking numbers;
+# nothing else is shown.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type delete-all-shipments to confirm. This deletes every shipment and cannot be undone"
+        required: true
+        type: string
+      seed_demo:
+        description: "Create five demo shipments afterwards, to look up by tracking number"
+        required: true
+        type: choice
+        default: "yes"
+        options:
+          - "yes"
+          - "no"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check the confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [[ "$CONFIRM" != delete-all-shipments ]]; then
+            echo "confirm must be exactly: delete-all-shipments" >&2
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Fetch credentials through the DNS endpoint
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROOF_OF_DELIVERY_BUCKET: ${{ secrets.GCP_PROOF_OF_DELIVERY_BUCKET }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          echo "::add-mask::$GCP_PROOF_OF_DELIVERY_BUCKET"
+          gcloud container clusters get-credentials shiptrack --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+      - name: Reset the data
+        # bash, named, runs with pipefail, so the status below is the script's and not tee's.
+        shell: bash
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROOF_OF_DELIVERY_BUCKET: ${{ secrets.GCP_PROOF_OF_DELIVERY_BUCKET }}
+          SEED: ${{ inputs.seed_demo }}
+        run: |
+          status=0
+          scripts/reset-data.sh delete-all-shipments "$SEED" | tee "$RUNNER_TEMP/reset-data.txt" || status=$?
+          # Counts and the synthetic tracking numbers only; safe to show, and shown even when the run failed, so
+          # that what the database part removed is on the page.
+          grep -E '^(RESET_DATA |SEEDED )' "$RUNNER_TEMP/reset-data.txt" | tee -a "$GITHUB_STEP_SUMMARY" || true
+          exit "$status"

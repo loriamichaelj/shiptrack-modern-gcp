@@ -19,6 +19,8 @@ env:
   TRIVY_VERSION: "v0.74.0"
   CHECKOV_VERSION: "3.3.21"
   PYYAML_VERSION: "6.0.2"
+  # The version modern's uv.lock puts in the image
+  PSYCOPG_VERSION: "3.3.6"
   GITLEAKS_VERSION: "8.30.1"
   # sha256 of gitleaks_<version>_linux_x64.tar.gz, from the release's checksums file
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
@@ -123,6 +125,11 @@ jobs:
           # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
           IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/shiptrack-modern@${IMAGE_DIGEST}" LEDGER_CONFIGMAP=shiptrack-ledger-example \
             envsubst '${IMAGE} ${GCP_PROJECT_ID} ${LEDGER_CONFIGMAP}' <deploy/validation/ledger-check.yaml >rendered/ledger-check.yaml
+          # shellcheck disable=SC2016 # envsubst reads these names; the shell must not expand them
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER}/shiptrack-modern@${IMAGE_DIGEST}" RESET_CONFIGMAP=shiptrack-reset-data-example \
+            RESET_SEED=yes GCP_PROOF_OF_DELIVERY_BUCKET=example-bucket \
+            envsubst '${IMAGE} ${GCP_PROJECT_ID} ${RESET_CONFIGMAP} ${RESET_SEED} ${GCP_PROOF_OF_DELIVERY_BUCKET}' \
+            <deploy/reset-data/job.yaml >rendered/reset-data.yaml
       - name: Validate (strict, with the CRD schemas)
         run: |
           crds='https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
@@ -144,11 +151,27 @@ jobs:
             --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
           pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/ledger-check.yaml --framework kubernetes --compact --quiet \
             --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
+          pipx run --spec "checkov==${CHECKOV_VERSION}" checkov -f rendered/reset-data.yaml --framework kubernetes --compact --quiet \
+            --skip-check CKV_K8S_21,CKV_K8S_11,CKV_K8S_9,CKV2_K8S_6
       - name: Database connection budget
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet "pyyaml==${PYYAML_VERSION}"
           "$RUNNER_TEMP/venv/bin/python" scripts/check-connection-budget.py rendered/chart.yaml
+
+  # ops-reset-data's SQL, as the application role, against PostgreSQL in a container (ADR-0036).
+  reset-data:
+    runs-on: ubuntu-24.04
+    environment: ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reset the data in a throwaway database
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "psycopg[binary]==${PSYCOPG_VERSION}"
+          PYTHON="$RUNNER_TEMP/venv/bin/python" scripts/test-reset-data.sh
 
   secrets:
     runs-on: ubuntu-24.04
