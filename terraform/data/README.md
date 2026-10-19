@@ -25,7 +25,7 @@ Before the first run, give the `ci` and `dev` environments their secrets (`terra
   run plans again and applies that plan; the log lists addresses and actions, never values.
 - **destroy-network**, **destroy-cloud-sql**, **destroy-secrets**, **destroy-pubsub**,
   **destroy-proof-of-delivery-storage**, **destroy-ingress**, and **destroy-monitoring** take a group down again, after two approvals and the typed name.
-  Remove the cluster first, then Cloud SQL, then the network. `destroy-cloud-sql` deletes the data and the
+  Remove the cluster first, then Cloud SQL, then the network. **destroy-all** takes the whole stack down in one run. `destroy-cloud-sql` deletes the data and the
   backups, and `destroy-proof-of-delivery-storage` deletes every stored document.
 
 Cost once applied **[VERIFY]**: Cloud SQL about $10 to $13 a month, Cloud NAT about $4 to $6 even with no

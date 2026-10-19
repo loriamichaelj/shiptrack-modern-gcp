@@ -3,7 +3,8 @@ name: destroy-pubsub
 # Takes down Pub/Sub: the topics, the subscriptions, the dead-letter topics, and any messages still in them
 # (ADR-0027). Two jobs, each in the `dev` environment and each needing the owner's approval: the first
 # shows the addresses and actions a destroy would make, the second makes a fresh plan and applies it.
-# Both fail unless `confirm` is exactly `pubsub`. Remove the cluster first, so no worker is pulling.
+# Both fail unless `confirm` is exactly `pubsub`. Remove the cluster first, so no worker is pulling. A targeted
+# destroy also removes what depends on the group; the plan job lists it.
 
 on:
   workflow_dispatch:

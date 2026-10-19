@@ -1,0 +1,218 @@
+name: destroy-all
+
+# Takes down everything the destroy-* workflows can, in one run (ADR-0039): the UI load balancer, the add-ons,
+# the cluster, and the whole data root (Cloud SQL, the network, Pub/Sub, the secrets, the bucket, monitoring, and
+# the UI's subnet, address, and policy). EVERY DOCUMENT, EVERY SHIPMENT, AND THE BACKUPS ARE DELETED. The seed
+# and finops roots are not touched: the state bucket, the service accounts, the trust, the budget, and the
+# billing export stay. Two jobs, each in the `dev` environment and each needing the owner's approval: the first
+# shows the addresses and actions of all three destroys, the second runs them in order. Both fail unless
+# `confirm` is exactly `all`.
+#
+# A run that stops part-way can be dispatched again: what is already gone is skipped, and the rest is planned
+# afresh. The destroy-* workflows of single groups stay for taking down one group.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type all to take the whole stack down"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform
+  cancel-in-progress: false
+
+env:
+  TF_VERSION: "1.16.4"
+  CLUSTER: shiptrack
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check the confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          [[ "$CONFIRM" == all ]] || { echo "::error::The confirmation does not match. Type all to take the whole stack down."; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+      # The add-ons root reads the cluster, so it can be planned only while the cluster exists.
+      - name: Look for the cluster
+        id: cluster
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          if gcloud container clusters describe "$CLUSTER" --region "${GCP_REGION:-us-central1}" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo "present=true" >>"$GITHUB_OUTPUT"
+            echo "The cluster exists."
+          else
+            echo "present=false" >>"$GITHUB_OUTPUT"
+            echo "There is no cluster; the add-ons are skipped."
+          fi
+      - name: Plan the add-ons
+        if: steps.cluster.outputs.present == 'true'
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: .github/scripts/terraform-destroy.sh addons plan all
+      - name: Plan the cluster
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          UNPROTECT_VAR: deletion_protection
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: .github/scripts/terraform-destroy.sh cluster plan all
+      - name: Plan the data root
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          UNPROTECT_VAR: deletion_protection proof_of_delivery_protection
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_ALERT_EMAIL: ${{ secrets.GCP_ALERT_EMAIL }}
+        run: .github/scripts/terraform-destroy.sh data plan all
+
+  destroy:
+    needs: plan
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    environment: dev
+    timeout-minutes: 150
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Check the confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          [[ "$CONFIRM" == all ]] || { echo "::error::The confirmation does not match. Type all to take the whole stack down."; exit 1; }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The Gateway is Kubernetes objects, so it is deleted as the deploy account. If the cluster went first, the
+      # load balancer's resources could be left behind and block the network.
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      # kubectl gets its token from gke-gcloud-auth-plugin, which the runner image does not include.
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          install_components: gke-gcloud-auth-plugin
+      - name: Look for the cluster
+        id: cluster
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          if gcloud container clusters describe "$CLUSTER" --region "${GCP_REGION:-us-central1}" --project "$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo "present=true" >>"$GITHUB_OUTPUT"
+            echo "The cluster exists."
+          else
+            echo "present=false" >>"$GITHUB_OUTPUT"
+            echo "There is no cluster; the Gateway and the add-ons are skipped."
+          fi
+      - name: Fetch credentials through the DNS endpoint
+        if: steps.cluster.outputs.present == 'true'
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: |
+          gcloud container clusters get-credentials "$CLUSTER" --region "${GCP_REGION:-us-central1}" \
+            --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+      - name: Delete the Gateway
+        if: steps.cluster.outputs.present == 'true'
+        run: |
+          kubectl delete -f deploy/gateway/route.yaml -f deploy/gateway/gateway.yaml -f deploy/gateway/health-check.yaml \
+            -f deploy/gateway/backend-policy.yaml -f deploy/gateway/networkpolicy.yaml --ignore-not-found --wait=true --timeout=15m
+
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+      # Deleting the Gateway starts Google's removal of the load balancer. The subnet, the address, and the policy
+      # cannot go while any part of it is left, and neither can the cluster without orphaning it, so wait for it.
+      - name: Wait for the load balancer to go
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          echo "::add-mask::$GCP_PROJECT_ID"
+          deadline=$((SECONDS + 900))
+          while true; do
+            left=0
+            for kind in forwarding-rules target-http-proxies target-https-proxies url-maps backend-services network-endpoint-groups; do
+              if ! names=$(gcloud compute "$kind" list --project "$GCP_PROJECT_ID" --format='value(name)' 2>/dev/null); then
+                echo "::error::Could not list $kind."
+                exit 1
+              fi
+              count=$(grep -c . <<<"$names" || true)
+              ((count == 0)) || echo "$kind: $count left"
+              left=$((left + count))
+            done
+            ((left == 0)) && break
+            ((SECONDS < deadline)) || { echo "::error::The load balancer is still there after 15 minutes. Nothing else was touched."; exit 1; }
+            sleep 15
+          done
+          echo "The load balancer is gone."
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      # A fresh plan is made in each step and applied from the same step; no plan file is uploaded.
+      - name: Destroy the add-ons
+        if: steps.cluster.outputs.present == 'true'
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: .github/scripts/terraform-destroy.sh addons destroy all
+      - name: Destroy the cluster
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          UNPROTECT_VAR: deletion_protection
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+        run: .github/scripts/terraform-destroy.sh cluster destroy all
+      # The protection is lowered on Cloud SQL and the bucket only. A second and third attempt wait for Google to
+      # release the private services connection after Cloud SQL is gone.
+      - name: Destroy the data root
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          UNPROTECT_VAR: deletion_protection proof_of_delivery_protection
+          UNPROTECT_TARGETS: module.cloud_sql module.proof_of_delivery_storage
+          DESTROY_ATTEMPTS: "3"
+          RETRY_WAIT_SECONDS: "300"
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
+          GCP_REGION: ${{ vars.GCP_REGION }}
+          GCP_ALERT_EMAIL: ${{ secrets.GCP_ALERT_EMAIL }}
+        run: .github/scripts/terraform-destroy.sh data destroy all

@@ -72,10 +72,13 @@ resource "google_sql_database_instance" "this" {
   depends_on = [var.private_services_connection]
 }
 
+# The database and the administrator are dropped with the instance. Deleting them first through the API fails on
+# PostgreSQL once db-init has granted roles on them, so a destroy abandons them (ADR-0039).
 resource "google_sql_database" "shiptrack" {
-  project  = var.project_id
-  name     = "shiptrack"
-  instance = google_sql_database_instance.this.name
+  project         = var.project_id
+  name            = "shiptrack"
+  instance        = google_sql_database_instance.this.name
+  deletion_policy = "ABANDON"
 }
 
 # The administrator, a member of cloudsqlsuperuser. The password is write-only: Terraform sends it
@@ -86,4 +89,5 @@ resource "google_sql_user" "admin" {
   name                = var.admin_user
   password_wo         = var.admin_password
   password_wo_version = var.admin_password_version
+  deletion_policy     = "ABANDON"
 }

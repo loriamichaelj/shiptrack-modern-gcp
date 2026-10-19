@@ -50,7 +50,7 @@ export), which is separate so that taking the others down keeps the cost history
 | `terraform/finops/` | The monthly budget with alerts, and the dataset for the billing export |
 | `deploy/` | The Helm values, the pinned chart commit, the db-init Job, `gateway/` (the UI's load balancer), and `validation/` (the check Jobs of `ops-validate`) |
 | `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, ui-ingress, monitoring, gke-autopilot, workload-access |
-| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, and the `ops-` workflows: `ops-contract`, `ops-validate`, `ops-queues`, `ops-restart`, `ops-reset-data`, `ops-ui-port`, and the read-only `ops-check-cluster`, `ops-check-cost`, `ops-check-state`, `ops-check-metrics`, and `ops-check-logs` |
+| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `destroy-all`, `deploy-app`, and the `ops-` workflows: `ops-contract`, `ops-validate`, `ops-queues`, `ops-restart`, `ops-reset-data`, `ops-ui-port`, and the read-only `ops-check-cluster`, `ops-check-cost`, `ops-check-state`, `ops-check-metrics`, and `ops-check-logs` |
 | `scripts/` | The chart arguments, the connection budget check, the rollout sampler, the contract and validation runs through a port-forward, `queues.sh` for the dead-letter queues, and `ui-access.sh`, which opens and closes the browser URL from your machine |
 | `docs/runbooks/` | One page per situation: deploy and rollback, dead-letter redrive, secret rotation, state recovery, and one per alert. Each records when it was tested |
 | `.github/scripts/` | The plan, apply, and destroy wrappers, which print addresses and actions only, and the cost report |
@@ -87,7 +87,7 @@ The stack is built, applied, and running the same image digest as AWS. What is p
 | 9 | Every resource carries `environment: dev` and `name: shiptrack` | Done for every resource that can carry them; the regional Cloud Armor policy and the Gateway's forwarding rule cannot, as recorded in the decisions |
 | 10 | Baseline cost within the design's range, or explained | Not done: the billing export has no rows yet |
 | 11 | The four named runbooks exist and are tested once | Partly: dead-letter is done; rollback, secret rotation, and the state restore are not |
-| 12 | Every cost-bearing group has a destroy workflow, and each was run once | The workflows exist; none has been run |
+| 12 | Every cost-bearing group has a destroy workflow, and each was run once | The workflows exist, and so does `destroy-all`; none has been run |
 
 ## Opening the UI in a browser
 

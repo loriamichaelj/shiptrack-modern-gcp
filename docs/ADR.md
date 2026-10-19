@@ -42,6 +42,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0036 | `data-reset-by-gated-workflow` | Accepted |
 | 0037 | `features-arrive-in-the-shared-image` | Accepted |
 | 0038 | `one-command-follows-the-owners-address` | Accepted |
+| 0039 | `destroy-all-in-one-run` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -502,3 +503,19 @@ The monthly budget moves from $50 to $75 (ADR-0028), because the baseline of abo
 - `urls` prints and checks the four URLs without changing anything. `ip` sets both secrets and does nothing else.
 
 **Consequences:** One command and two approvals move every allow-list to a new address and confirm the pages load. Nothing readable reaches a public log: the address is in secrets, and the URLs are ciphertext that only the run's key can read. `open` replaces `PREVIEW_CIDRS` with the one current address. `urls` also needs an approval, because `ops-ui-port` runs only in the `dev` environment. The platform's plan is made and applied in one approved job, so the drift guard is what keeps anything other than `preview["0"]` and `grafana["0"]` out of it. The script needs `gh`, `curl`, and OpenSSL 3; macOS's own `openssl` is LibreSSL and is refused.
+
+## ADR-0039: destroy-all-in-one-run
+
+**Status:** Accepted
+
+**Context:** ADR-0027 gave every cost-bearing group its own destroy workflow, and none has been run. Taking the stack down that way is nine workflows and eighteen approvals, in an order the owner must remember. Two things make the order matter beyond Google's own refusals. A targeted destroy also removes what depends on the target, so the groups of the data root are not independent. And the UI's load balancer is made by the Gateway, which Terraform does not hold: if the cluster goes while Google still has the load balancer, its parts are left behind, and they block the subnet, the address, and the policy. The owner asked for one workflow that takes everything down, with finops kept.
+
+**Decision:**
+- `destroy-all` takes the stack down in two jobs, each in the `dev` environment and each approved: a plan of all three destroys, then the destroy. `confirm` must be `all`. The destroy job runs these steps in order: delete the Gateway objects as the deploy account; wait until the load balancer's forwarding rules, proxies, URL maps, backend services, and network endpoint groups are gone (15 minutes, then fail before anything else is touched); destroy the add-ons root; destroy the cluster root; destroy the data root. If the cluster is already gone, the Gateway and add-on steps are skipped, so a run that stopped part-way can be dispatched again.
+- Each root is destroyed whole, with no `-target`, so Terraform orders the data root by its own graph: Cloud SQL before the network, the UI's subnet, address, and policy, and the rest in dependency order. The protections are lowered first, by a targeted apply of Cloud SQL and the bucket only (`UNPROTECT_TARGETS`), because a plan without a target would apply every pending change of the root. The cluster's protection is lowered the same way.
+- The data root is tried up to three times, five minutes apart, planning afresh each time. Google can hold the private services connection for some minutes after Cloud SQL is deleted, and the destroy of the connection then fails until it lets go **[VERIFY]**.
+- The Cloud SQL database and administrator take `deletion_policy = "ABANDON"`. Through the API, PostgreSQL refuses to drop a user or a database that has had roles granted on it, as db-init does, and both go with the instance anyway **[VERIFY]**. The value is read from state when the resource is deleted, so the unprotecting apply carries it into state before the destroy.
+- `terraform-destroy.sh` accepts no target (the whole root), several protection variables, `UNPROTECT_TARGETS`, and `DESTROY_ATTEMPTS`. The nine single-group workflows are unchanged and stay for taking down one group.
+- The seed and finops roots are outside it, as in ADR-0027 and ADR-0028. The state bucket, the service accounts, the trust, the budget, the billing export, and what the owner made by hand all stay.
+
+**Consequences:** The whole stack is two approvals and a typed word. It deletes the database, its backups, every proof-of-delivery document, and every queued message. The first run is also the first test of the apply account's delete rights, of Autopilot's cleanup of its own firewall rules, and of the connection's release, so it may fail part-way; the plan is made afresh on the next dispatch and what is gone is skipped. Rebuilding is `apply-terraform` for `data`, `cluster`, and `addons`, then `deploy-app`; the Cloud SQL name, the bucket name, and the database passwords are new, and `db-init` runs again. Nothing here rebuilds the stack, and the rebuild has not been rehearsed. The load balancer's address changes with it, so `scripts/ui-access.sh open` is needed afterwards. A destroy and `ops-ui-port` do not share a concurrency group, so do not run them together.
