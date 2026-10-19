@@ -44,31 +44,50 @@ export), which is separate so that taking the others down keeps the cost history
 | Path | What it holds |
 |---|---|
 | `terraform/seed/` | State bucket, APIs, service accounts, GitHub trust, permissions. Setup steps are in its README |
-| `terraform/data/` | The network, Cloud SQL, the database secrets, Pub/Sub, and the proof-of-delivery bucket |
+| `terraform/data/` | The network, Cloud SQL, the database secrets, Pub/Sub, the proof-of-delivery bucket, the UI's ingress objects, and the alerts and dashboard |
 | `terraform/cluster/` | The GKE Autopilot cluster and the workloads' IAM bindings |
 | `terraform/addons/` | The `shiptrack` namespace and the deploy account's role in it |
 | `terraform/finops/` | The monthly budget with alerts, and the dataset for the billing export |
-| `deploy/` | The Helm values, the pinned chart commit, the db-init Job, and `gateway/`, the objects of the UI's load balancer |
-| `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, ui-ingress, gke-autopilot, workload-access |
-| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, `ops-contract`, `ops-validate`, `ops-queues`, `ops-check-state`, `ops-ui-port`, `ops-check-cluster`, and `ops-check-cost` |
-| `scripts/` | The chart arguments, the connection budget check, the rollout sampler, the contract run through a port-forward, and `ui-access.sh`, which opens and closes the browser URL from your machine |
+| `deploy/` | The Helm values, the pinned chart commit, the db-init Job, `gateway/` (the UI's load balancer), and `validation/` (the check Jobs of `ops-validate`) |
+| `terraform/modules/` | The pieces the roots call: network, cloud-sql, secrets, pubsub, proof-of-delivery-storage, ui-ingress, monitoring, gke-autopilot, workload-access |
+| `.github/workflows/` | `apply-seed`, `apply-terraform`, `ci-checks`, `ci-terraform`, a `destroy-` workflow per cost-bearing group, `deploy-app`, and the `ops-` workflows: `ops-contract`, `ops-validate`, `ops-queues`, `ops-restart`, `ops-ui-port`, and the read-only `ops-check-cluster`, `ops-check-cost`, `ops-check-state`, `ops-check-metrics`, and `ops-check-logs` |
+| `scripts/` | The chart arguments, the connection budget check, the rollout sampler, the contract and validation runs through a port-forward, `queues.sh` for the dead-letter queues, and `ui-access.sh`, which opens and closes the browser URL from your machine |
+| `docs/runbooks/` | One page per situation: deploy and rollback, dead-letter redrive, secret rotation, state recovery, and one per alert. Each records when it was tested |
 | `.github/scripts/` | The plan, apply, and destroy wrappers, which print addresses and actions only, and the cost report |
 
 ## Status
 
+The stack is built, applied, and running the same image digest as AWS. What is proven, and what is not, is below.
+
 | Area | State |
 |---|---|
 | Design | Done |
-| Application changes in `shiptrack-modern` | Done and merged: the cloud seam, the chart switches, the GHCR image publish, and the `db-init` command |
-| Seed (state bucket, service accounts, trust) | Done and applied |
-| Data, cluster, and add-ons | Done and applied; the deploy account reaches the cluster and only its own namespace |
-| FinOps | Done: the budget alerts, the cost export, and `ops-check-cost` |
-| Workflows | All built |
-| First release | `deploy-app` has run: db-init, the migration, the Helm install, and the contract smoke suite passed on the first dispatch. The full contract suite (`ops-contract`) then passed |
-| Deploy files | Built: the Helm values, the pinned chart, the db-init Job, and a pull request check that renders and scans them |
-| Monitoring | Built: alert policies, the notification channel, and a dashboard in the `data` root; `destroy-monitoring` |
-| Validation | Built: `ops-validate` (event loss across a deploy and a pod reclaim, and the SLA alert check). Not passed yet |
-| Operations | Runbooks written; the dead-letter one is tested end to end, the state one in part. Still to do: a rollback and a secret rotation, the cost analysis, and a run of each destroy workflow |
+| Application changes in `shiptrack-modern` | Done and merged: the cloud seam, the chart switches, the GHCR image publish, the `db-init` command, the network policy that admits the managed Prometheus collectors, and the secret refetch after a rejected login |
+| Seed, data, cluster, add-ons | Done and applied; the deploy account reaches the cluster and only its own namespace |
+| FinOps | Budget alerts and the cost export are in place. The export had no rows on 18 October, so there is no cost analysis yet |
+| Release | Deployed by `deploy-app`; the full contract suite passes through a port-forward |
+| UI | A browser URL through a regional load balancer, open to one address, plain HTTP |
+| Monitoring | Applied: eight alerts, a notification channel, and a dashboard. Metrics reach Managed Prometheus. The dashboard shows an update in every plan, which is not fixed |
+| Validation | Passed: no event lost across a rollout or across every pod being deleted under load (1208 of 1208 events stored, twice); one SLA alert per breached shipment, on a small sample (2 shipments) |
+| Runbooks | Written. The dead-letter one is tested end to end; deploy and state recovery in part; secret rotation found a defect in the application, now fixed, and is not yet re-run; the others are not tested as responses to an alert |
+| Dependabot | Not set up here, though the design lists it |
+
+### Acceptance criteria
+
+| # | Criterion | State |
+|---|---|---|
+| 1 | One digest in ECR and GHCR, and GCP runs it | Done |
+| 2 | One image on every cloud, AWS and Azure unchanged | Done, except that the secret refetch fix improves AWS behavior, as recorded in the decisions of `shiptrack-modern` |
+| 3 | Every resource except the by-hand seed comes from Terraform applied by a workflow | Done |
+| 4 | No service account key, no Kubernetes Secret holding a credential, no identifier in git | Done |
+| 5 | The contract `full` suite passes through a port-forward | Done |
+| 6 | Zero lost events across a deploy and a Spot preemption | Done: the pod side of both, tested by restarting and deleting pods under load |
+| 7 | Exactly one `sla_alerts` row per breached shipment | Done on a small sample |
+| 8 | `/ui/` is served with the security headers and the `modern` badge | Partly checked: the page answers and the stack header says `modern`; the other headers and the badge are not checked |
+| 9 | Every resource carries `environment: dev` and `name: shiptrack` | Done for every resource that can carry them; the regional Cloud Armor policy and the Gateway's forwarding rule cannot, as recorded in the decisions |
+| 10 | Baseline cost within the design's range, or explained | Not done: the billing export has no rows yet |
+| 11 | The four named runbooks exist and are tested once | Partly: dead-letter is done; rollback, secret rotation, and the state restore are not |
+| 12 | Every cost-bearing group has a destroy workflow, and each was run once | The workflows exist; none has been run |
 
 ## Opening the UI in a browser
 
