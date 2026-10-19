@@ -95,13 +95,15 @@ The application has no public address until you ask for one, and then only your 
 `kubectl port-forward` always works (see below). For a URL in a browser, from one address:
 
 ```sh
-scripts/ui-access.sh open     # sets the allow-list to your current address and dispatches ops-ui-port open
-scripts/ui-access.sh url      # prints http://<address>/ui/
+scripts/ui-access.sh open     # moves the GCP and AWS allow-lists to your current address, applies both, and prints
+                              # the working URLs of modern, legacy, Grafana, and GCP
+scripts/ui-access.sh urls     # prints and checks the four URLs, changing nothing
+scripts/ui-access.sh url      # prints http://<address>/ui/ from gcloud
 scripts/ui-access.sh close    # admits nobody; the load balancer is still billed
 scripts/ui-access.sh remove   # deletes the load balancer and stops its charge
 ```
 
-Approve the `dev` environment in GitHub when a run waits. The first `open` creates the load balancer and takes several
+Approve the `dev` environment in GitHub when a run waits; `open` waits for ops-ui-port here and for the platform's apply-terraform. The workflows print the URLs only encrypted to a key the script makes for the run, and the script decrypts them on your machine. The first `open` creates the load balancer and takes several
 minutes. Your address is kept in a masked secret, never in a workflow input, because inputs are public. The URL is plain
 HTTP, so what you do in the UI is not encrypted; the allow-list keeps everyone else out. The load balancer adds about
 $24 a month while it exists.
