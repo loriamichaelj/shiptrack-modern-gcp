@@ -86,8 +86,10 @@ jobs:
             open) range_arg=$RANGES ;;
             close | remove) range_arg=$CLOSED_RANGE ;;
             status)
+              # A regional policy's rule comes back as a list of one rule, a global one's as the rule itself.
               state=$(gcloud compute security-policies rules describe "$PRIORITY" "${common[@]}" --format=json 2>/dev/null \
-                | jq -r 'if .match.config.srcIpRanges == ["192.0.2.1/32"] then "closed" else "open for \(.match.config.srcIpRanges | length) range(s)" end')
+                | jq -r --arg closed "$CLOSED_RANGE" '(if type == "array" then .[0] else . end).match.config.srcIpRanges
+                    | if . == [$closed] then "closed" else "open for \(length) range(s)" end')
               echo "Cloud Armor allow rule: ${state:-unknown}"
               exit 0
               ;;
