@@ -116,10 +116,11 @@ shiptrack-modern-gcp/
 │   ├── chart-ref                      # pinned shiptrack-modern commit SHA
 │   ├── db-init/                       # Job manifest; the SQL is db/init.sql in the application image (ADR-0030)
 │   ├── gateway/                       # the UI's Gateway, route, and policies, applied by ops-ui-port (ADR-0031)
+│   ├── reset-data/                    # the Job and script run by ops-reset-data, and the test schema (ADR-0036)
 │   └── validation/                    # the SLA and ledger check Jobs run by ops-validate (ADR-0033)
-├── scripts/                           # render checks, contract run, validate.sh, queues.sh, ui-access.sh
+├── scripts/                           # render checks, contract run, validate.sh, queues.sh, ui-access.sh, reset-data.sh
 ├── .github/
-│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, and ops-* (contract, validate, queues, restart, ui-port, and the read-only checks)
+│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, and ops-* (contract, validate, queues, restart, reset-data, ui-port, and the read-only checks)
 │   ├── scripts/terraform-ci.sh        # plan/apply wrapper for data, cluster, addons, and finops that masks identifiers
 │   ├── scripts/terraform-destroy.sh   # shared by every destroy-* workflow (ADR-0027)
 │   └── dependabot.yml                 # github-actions, terraform
@@ -340,6 +341,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | `ops-validate` | dispatch with a scenario | Event-loss, preemption, and SLA checks (§9.3) |
 | `ops-queues` | dispatch with an action and a flow | Status, a malformed test message, and redrive of a dead-letter queue (ADR-0034) |
 | `ops-check-state` | dispatch | Lists the saved versions of each root's state; changes nothing (ADR-0034) |
+| `ops-reset-data` | dispatch with a confirmation | Deletes every shipment and its proof-of-delivery files, then optionally seeds five demo shipments, from a Job in the cluster (ADR-0036) |
 
 `deploy-app`:
 1. `environment: dev` (the user approves); `concurrency: deploy-dev` without cancel.
