@@ -12,7 +12,7 @@
 
 ## 0. Instructions for the implementing agent
 
-1. **Modern keeps running on AWS and Azure.** This repository adds a third, independent home for the same application on Google Kubernetes Engine. Nothing here changes how modern behaves on AWS or Azure. App changes live in `shiptrack-modern`, as separate pull requests that name what they implement (§5), and they leave AWS and Azure behavior and the frozen API contract alone.
+1. **Modern keeps running on AWS and Azure.** This repository adds a third, independent home for the same application on Google Kubernetes Engine. Nothing here changes how modern behaves on AWS or Azure. App changes live in `shiptrack-modern`, as separate pull requests that name what they implement (§5), and they leave AWS and Azure behavior alone. Features and UI changes are built in `shiptrack-modern` too, for every cloud at once, and reach GCP in the same image digest (ADR-0037).
 2. **This repository holds no application code.** It holds GCP infrastructure (Terraform), GitHub workflows, GCP Helm values, CI checks, and docs.
 3. **Cost is a design constraint** (ADR-0004). Choose the cheapest option that meets this design, record its approximate monthly cost in the ADR, and mark every price **[VERIFY]** until it is checked against Google's pricing pages.
 4. **All infrastructure changes run through GitHub Actions** with GitHub OIDC and Workload Identity Federation, a separate service account per kind of job, and environment approval on every apply (ADR-0002). The implementing agent never runs `terraform apply`, `helm install/upgrade`, `kubectl apply`, or a `gcloud` command that creates, updates, or deletes a ShipTrack resource. It runs lint, format, validation, and read-only `gcloud` (`describe`, `list`, `get-iam-policy`), and it does not install `gcloud` components. It never reads or prints secret values, access tokens, or kubeconfig credentials unless asked.
@@ -173,7 +173,7 @@ Credentials come from Application Default Credentials, which on GKE resolve thro
 | Logs | JSON on stdout | The same JSON, plus `severity` and `message` fields so Cloud Logging reads the level and text. Other fields are unchanged |
 | Spot preemption | Not applicable | The pod gets SIGTERM with a short grace period. In-flight messages are redelivered, and the worker is idempotent, so nothing is lost |
 
-The credential shape, the redaction filter, the `DbCredentials` type, and all metrics and log fields are unchanged. The API contract and the UI are unchanged.
+The credential shape, the redaction filter, the `DbCredentials` type, and all metrics and log fields are unchanged. The seam does not change the API or the UI.
 
 ### 5.4 Dependencies and image size
 `google-cloud-secret-manager`, `google-cloud-pubsub`, `google-cloud-storage`, and `google-auth` join the one image, because the same digest must run on every cloud. The image-size target in modern §6 is re-measured and, if exceeded, recorded in modern's ADR. The Azure dependencies are added by the Azure work; the two sets are independent.
