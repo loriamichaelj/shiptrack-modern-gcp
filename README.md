@@ -111,6 +111,17 @@ $24 a month while it exists.
 Without a load balancer: `kubectl -n shiptrack port-forward svc/shiptrack-api 8000:8000`, then
 `http://localhost:8000/ui/`.
 
+## The UI on GCP
+
+The same UI as on AWS and Azure, served by the pods on GKE and reading the Cloud SQL database. The Live page
+makes real calls to the API from the browser, so the numbers below are traffic against this stack.
+
+![Live traffic: shipments moving through their statuses at 20 requests a second](docs/images/ui-live-traffic.png)
+
+![Live metrics: throughput, latency, where the shipments are, and the live feed](docs/images/ui-live-metrics.png)
+
+![Browse: shipments by status and by carrier, with filters and a CSV download](docs/images/ui-browse.png)
+
 ## Getting started
 
 The one-time setup (Workload Identity pool and provider, the seed service account, GitHub environments,
