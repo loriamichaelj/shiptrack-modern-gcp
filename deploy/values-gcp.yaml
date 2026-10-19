@@ -15,8 +15,10 @@ image:
 logLevel: INFO
 baseUrl: ""
 
-# Names of resources the data root creates. They hold no identifier.
+# Names of resources the data root creates. They hold no identifier. The region is the cluster's
+# (ADR-0006), shown in the UI's footer through X-ShipTrack-Region (modern ADR-0039).
 gcp:
+  region: us-central1
   dbSecretName: shiptrack-db-app
   dbMigratorSecretName: shiptrack-db-migrator
   eventsTopic: shiptrack-carrier-events
