@@ -8,8 +8,9 @@ name: destroy-all
 # shows the addresses and actions of all three destroys, the second runs them in order. Both fail unless
 # `confirm` is exactly `all`.
 #
-# A run that stops part-way can be dispatched again: what is already gone is skipped, and the rest is planned
-# afresh. The destroy-* workflows of single groups stay for taking down one group.
+# The order matters: the Gateway, the load balancer, the add-ons, the network endpoint groups, the cluster, the
+# data root. A run that stops part-way can be dispatched again: what is already gone is skipped, and the rest is
+# planned afresh. The destroy-* workflows of single groups stay for taking down one group.
 
 on:
   workflow_dispatch:
@@ -148,9 +149,15 @@ jobs:
         run: |
           gcloud container clusters get-credentials "$CLUSTER" --region "${GCP_REGION:-us-central1}" \
             --project "$GCP_PROJECT_ID" --dns-endpoint >/dev/null
+      # Without the add-ons the deploy account has no rights in the namespace (its Role goes with it), and the
+      # Gateway went with the namespace. The next step checks that the load balancer is gone either way.
       - name: Delete the Gateway
         if: steps.cluster.outputs.present == 'true'
         run: |
+          if ! kubectl auth can-i delete gateways.gateway.networking.k8s.io --namespace shiptrack >/dev/null 2>&1; then
+            echo "The deploy account has no rights in the shiptrack namespace, so the add-ons are gone; no Gateway to delete."
+            exit 0
+          fi
           kubectl delete -f deploy/gateway/route.yaml -f deploy/gateway/gateway.yaml -f deploy/gateway/health-check.yaml \
             -f deploy/gateway/backend-policy.yaml -f deploy/gateway/networkpolicy.yaml --ignore-not-found --wait=true --timeout=15m
 
@@ -160,28 +167,14 @@ jobs:
           service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
       # Deleting the Gateway starts Google's removal of the load balancer. The subnet, the address, and the policy
       # cannot go while any part of it is left, and neither can the cluster without orphaning it, so wait for it.
+      # The network endpoint groups are not in this list: the cluster's controller owns them and removes them only
+      # after the api Service is deleted, which the add-ons destroy does. They are waited for after it.
       - name: Wait for the load balancer to go
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-        run: |
-          echo "::add-mask::$GCP_PROJECT_ID"
-          deadline=$((SECONDS + 900))
-          while true; do
-            left=0
-            for kind in forwarding-rules target-http-proxies target-https-proxies url-maps backend-services network-endpoint-groups; do
-              if ! names=$(gcloud compute "$kind" list --project "$GCP_PROJECT_ID" --format='value(name)' 2>/dev/null); then
-                echo "::error::Could not list $kind."
-                exit 1
-              fi
-              count=$(grep -c . <<<"$names" || true)
-              ((count == 0)) || echo "$kind: $count left"
-              left=$((left + count))
-            done
-            ((left == 0)) && break
-            ((SECONDS < deadline)) || { echo "::error::The load balancer is still there after 15 minutes. Nothing else was touched."; exit 1; }
-            sleep 15
-          done
-          echo "The load balancer is gone."
+        run: >-
+          .github/scripts/wait-for-gone.sh "The load balancer is"
+          forwarding-rules target-http-proxies target-https-proxies url-maps backend-services
 
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
@@ -196,6 +189,12 @@ jobs:
           GCP_PROJECT_NUMBER: ${{ secrets.GCP_PROJECT_NUMBER }}
           GCP_REGION: ${{ vars.GCP_REGION }}
         run: .github/scripts/terraform-destroy.sh addons destroy all
+      # The controller deletes the groups once their Service is gone. It runs in the cluster, so this comes before
+      # the cluster is destroyed, and a group left behind would block the network.
+      - name: Wait for the network endpoint groups to go
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: .github/scripts/wait-for-gone.sh "The network endpoint groups are" network-endpoint-groups
       - name: Destroy the cluster
         env:
           CONFIRM: ${{ inputs.confirm }}
