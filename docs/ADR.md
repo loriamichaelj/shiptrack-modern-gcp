@@ -40,6 +40,7 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 | 0034 | `dead-letter-and-state-operations-by-workflow` | Accepted |
 | 0035 | `every resource that can carry the labels does` | Accepted |
 | 0036 | `data-reset-by-gated-workflow` | Accepted |
+| 0037 | `features-arrive-in-the-shared-image` | Accepted |
 
 ## ADR-0001: one-app-three-clouds
 
@@ -50,6 +51,8 @@ Decisions are recorded here, oldest first. Each entry has a status (Planned, Acc
 **Decision:** Keep one application and one image. `SHIPTRACK_CLOUD` takes `aws` (default), `azure`, or `gcp`. GCP adds its implementations behind the seam the Azure work defines, so the seam is built once. The chart gains `gcp` as a third value of `cloud`. The API contract and the UI stay frozen.
 
 **Consequences:** All app changes are separate pull requests in `shiptrack-modern` that leave AWS and Azure behavior alone, and the AWS render stays byte-identical. The image carries all three clouds' client libraries, so its size is re-measured. This repository holds no application code.
+
+**Amended by ADR-0037:** modern's API is open to additive change (modern ADR-0038), and the UI changes with it. Both are still built in `shiptrack-modern` only.
 
 ## ADR-0002: github-oidc-and-workload-identity-federation
 
@@ -469,3 +472,18 @@ The monthly budget moves from $50 to $75 (ADR-0028), because the baseline of abo
 - `scripts/test-reset-data.sh` runs the reset as the application role against PostgreSQL 17 in a container with the tables of modern's migration, using the same checks as the platform's test. The `reset-data` job of `ci-checks` runs it. The schema file mirrors the migration by hand, as the platform's does.
 
 **Consequences:** It is the only thing on GCP that deletes shipments, it cannot be undone, and it needs a person to approve it. Events still waiting in the events subscription for shipments that are gone fail to apply and end in the dead-letter subscription, which alerts. The workflow says to stop traffic and check `ops-queues status` first, and nothing checks it. The bucket has versioning off and Google's default soft-delete window of seven days (read from the live bucket; Terraform sets no policy), so a removed document can be restored for a week and is then gone. A schema change in `shiptrack-modern` that touches these tables needs the test schema updated by hand. The AWS data is untouched; the platform's workflow resets it.
+
+## ADR-0037: features-arrive-in-the-shared-image
+
+**Status:** Accepted
+
+**Context:** Modern ADR-0038 lifts the API freeze. Modern may add endpoints, fields, and headers as long as the legacy contract is kept. The owner wants new features and UI changes, and wants the same UI on AWS and GCP. The UI is built into the application image, and the API serves it at `/ui/`. GCP runs the image that modern's `release-image` publishes to GHCR, by digest, with the chart at the commit in `deploy/chart-ref`.
+
+**Decision:**
+- Features and UI changes are built in `shiptrack-modern` only. This repository still holds no application or UI code.
+- GCP deploys the same digest that AWS deploys, through `deploy-app`, after environment approval. Both clouds then serve the same API and UI.
+- When a release changes the chart, `deploy/chart-ref` moves to the modern commit that built the digest, in the same pull request as any new values in `deploy/values-gcp.yaml`.
+- A feature that needs a new GCP resource or permission (a topic, a bucket, a secret, a binding) adds it here through Terraform. It is applied by `apply-terraform` before the deploy that uses it. A feature that needs only a table or a column needs nothing here, because `db-init` and the migrate hook run modern's migrations.
+- `ops-contract` keeps running the platform suite unedited. It proves the legacy contract on GCP. Modern's own tests cover the additions.
+
+**Consequences:** GCP runs the previous release from the moment AWS deploys a new digest until `deploy-app` is dispatched here, so the two clouds can briefly serve different UIs. A feature that needs a GCP resource takes two approvals: the apply, then the deploy. Because GCP has its own database and no legacy fallback, the expand-only schema rule matters less here, but the migrations are shared and follow it anyway.
