@@ -195,7 +195,10 @@ jobs:
         env:
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
         run: .github/scripts/wait-for-gone.sh "The network endpoint groups are" network-endpoint-groups
+      # With the cluster gone there is nothing left in this root, and its configuration reads outputs of the data
+      # root, which a run that stopped part-way may already have emptied.
       - name: Destroy the cluster
+        if: steps.cluster.outputs.present == 'true'
         env:
           CONFIRM: ${{ inputs.confirm }}
           UNPROTECT_VAR: deletion_protection
