@@ -134,7 +134,14 @@ if [[ "$mode" == destroy && ${#unprotect[@]} -gt 0 ]]; then
   log "Lowering the protection (${UNPROTECT_VAR}) on the targets."
   quietly terraform plan -input=false -lock-timeout=120s "${unprotect_targets[@]}" "${unprotect[@]}" -out=unprotect.tfplan
   summarize unprotect.tfplan "lower the protection"
-  quietly terraform apply -input=false -lock-timeout=120s unprotect.tfplan
+  # Lowering a protection only updates. A plan that creates something means the targets are gone or partly gone,
+  # as when a run that stopped part-way is dispatched again, and applying it would build them again.
+  creates=$(terraform show -json unprotect.tfplan | jq '[.resource_changes[]? | select(.change.actions | index("create"))] | length')
+  if ((creates > 0)); then
+    log "The plan would create ${creates} resource(s): the targets are gone or partly gone. Not applying it."
+  else
+    quietly terraform apply -input=false -lock-timeout=120s unprotect.tfplan
+  fi
 fi
 
 attempt=1
