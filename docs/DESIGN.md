@@ -106,25 +106,28 @@ shiptrack-modern-gcp/
 ├── terraform/
 │   ├── seed/                     # state bucket, APIs, service accounts, GitHub trust, permissions (README: one-time setup)
 │   │   └── scripts/                   # ci.sh (plan/apply, first-run bucket seeding), github-setup.sh
-│   ├── data/                          # network, NAT, Cloud SQL, Pub/Sub, bucket, Secret Manager, workload IAM, alerts
+│   ├── data/                          # network, NAT, Cloud SQL, Pub/Sub, bucket, Secret Manager, UI ingress, alerts and dashboard
 │   ├── cluster/                       # GKE Autopilot
-│   ├── addons/                        # namespace, deployer RBAC, optional Gateway
+│   ├── addons/                        # namespace, deployer RBAC
+│   ├── finops/                        # budget with alerts, billing export dataset
 │   └── modules/                       # network, then one per resource group of the destroy workflows (ADR-0027), and workload-access (one workload's IAM bindings)
 ├── deploy/
 │   ├── values-gcp.yaml                # non-identifying Helm values for cloud=gcp
 │   ├── chart-ref                      # pinned shiptrack-modern commit SHA
-│   └── db-init/                  # Job manifest; the SQL is db/init.sql in the application image (ADR-0030)
-├── scripts/                           # render checks, local helpers
+│   ├── db-init/                       # Job manifest; the SQL is db/init.sql in the application image (ADR-0030)
+│   ├── gateway/                       # the UI's Gateway, route, and policies, applied by ops-ui-port (ADR-0031)
+│   └── validation/                    # the SLA and ledger check Jobs run by ops-validate (ADR-0033)
+├── scripts/                           # render checks, contract run, validate.sh, queues.sh, ui-access.sh
 ├── .github/
-│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, ops-contract
-│   ├── scripts/terraform-ci.sh        # plan/apply wrapper for data, cluster, and addons that masks identifiers
+│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, and ops-* (contract, validate, queues, restart, ui-port, and the read-only checks)
+│   ├── scripts/terraform-ci.sh        # plan/apply wrapper for data, cluster, addons, and finops that masks identifiers
 │   ├── scripts/terraform-destroy.sh   # shared by every destroy-* workflow (ADR-0027)
 │   └── dependabot.yml                 # github-actions, terraform
 ├── .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
 └── README.md
 ```
 
-**Four Terraform roots**, applied in this order: `seed`, `data`, `cluster`, `addons`. The `kubernetes` provider cannot be configured reliably from a cluster created in the same apply, so `addons` follows `cluster`. State objects: `gcp/<root>/default.tfstate` in the state bucket (ADR-0016).
+**Five Terraform roots**, applied in this order: `seed`, `data`, `cluster`, `addons`, with `finops` apart from them so that taking the others down keeps the cost history. The `kubernetes` provider cannot be configured reliably from a cluster created in the same apply, so `addons` follows `cluster`. State objects: `gcp/<root>/default.tfstate` in the state bucket (ADR-0016).
 
 ---
 
@@ -328,7 +331,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | Workflow | Trigger | Does |
 |---|---|---|
 | `ci-checks` | pull request | Static checks (§10), in environment `ci` |
-| `ci-terraform` | pull request | In environment `ci`, `plan` for `data`, `cluster`, and `addons` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
+| `ci-terraform` | pull request | In environment `ci`, `plan` for `data`, `cluster`, `addons`, and `finops` as `shiptrack-plan`, with `-lock=false`; comment shows addresses and actions only; no plan artifacts. `seed` is planned only by `apply-seed`, because the first run precedes the plan account |
 | `apply-seed` | dispatch | Applies `terraform/seed` as the seed account: two jobs in the `seed` environment, plan then apply, each approved (§8.1) |
 | `apply-terraform` | dispatch with a root | `apply` of the chosen root (`data`, then `cluster`, then `addons`) as `shiptrack-apply`, in the `dev` environment with approval |
 | `destroy-*` | dispatch with a confirmation | Takes down one cost-bearing resource group (§9.4) |
@@ -482,7 +485,7 @@ Cheaper options considered and rejected: a Standard zonal cluster with one Spot 
 | G-R9 | Pub/Sub delivers at least once | The worker is idempotent on the idempotency key |
 | G-R10 | Cloud NAT is a fixed cost with no traffic | Smallest configuration; removable only by making nodes public, which is rejected |
 | G-R11 | Public repository and cloud identifiers | Scrub and gitleaks rules (§10); masked secrets |
-| G-R12 | The cloud seam is shared with Azure and not yet built | Built once in `shiptrack-modern`, with tests for all clouds |
+| G-R12 | The cloud seam is shared with Azure | Built once in `shiptrack-modern`, with tests for all clouds |
 | G-R13 | The free-tier credit covers one cluster per billing account | This project is the only one on the billing account; a second cluster there would cost about $73 a month |
 | G-R14 | Autopilot rounds requests up, which can raise the bill | Measured after the first deploy; sizes adjusted |
 
