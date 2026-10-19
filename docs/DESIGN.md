@@ -120,9 +120,9 @@ shiptrack-modern-gcp/
 │   └── validation/                    # the SLA and ledger check Jobs run by ops-validate (ADR-0033)
 ├── scripts/                           # render checks, contract run, validate.sh, queues.sh, ui-access.sh, reset-data.sh
 ├── .github/
-│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-*, deploy-app, and ops-* (contract, validate, queues, restart, reset-data, ui-port, and the read-only checks)
+│   ├── workflows/                     # apply-seed, ci-checks, ci-terraform, apply-terraform, destroy-* and destroy-all, deploy-app, and ops-* (contract, validate, queues, restart, reset-data, ui-port, and the read-only checks)
 │   ├── scripts/terraform-ci.sh        # plan/apply wrapper for data, cluster, addons, and finops that masks identifiers
-│   ├── scripts/terraform-destroy.sh   # shared by every destroy-* workflow (ADR-0027)
+│   ├── scripts/terraform-destroy.sh   # shared by every destroy-* workflow and destroy-all (ADR-0027, ADR-0039)
 │   └── dependabot.yml                 # github-actions, terraform
 ├── .tflint.hcl  .checkov.yaml  .gitleaks.toml  .gitignore
 └── README.md
@@ -336,6 +336,7 @@ Providers: `kubernetes`, authenticated with the apply account's short-lived toke
 | `apply-seed` | dispatch | Applies `terraform/seed` as the seed account: two jobs in the `seed` environment, plan then apply, each approved (§8.1) |
 | `apply-terraform` | dispatch with a root | `apply` of the chosen root (`data`, then `cluster`, then `addons`) as `shiptrack-apply`, in the `dev` environment with approval |
 | `destroy-*` | dispatch with a confirmation | Takes down one cost-bearing resource group (§9.4) |
+| `destroy-all` | dispatch with a confirmation | Takes down the load balancer, the add-ons, the cluster, and the data root in one run (§9.4) |
 | `deploy-app` | dispatch with a digest | Deploy (below) |
 | `ops-contract` | dispatch | Contract suite through a port-forward (§9.3) |
 | `ops-validate` | dispatch with a scenario | Event-loss, preemption, and SLA checks (§9.3) |
@@ -381,6 +382,8 @@ Every pull request that provisions a cost-bearing resource also adds its destroy
 | `destroy-monitoring` | Alert policies, notification channel, dashboard |
 
 Each runs as `shiptrack-apply` in the `dev` environment with two approvals, plan then destroy. The plan lists addresses and actions only, and fails unless the `confirm` input equals the resource name. The protections (`deletion_protection`, `force_destroy`) are lowered inside the approved run and are on again for anything that remains. Remove groups in reverse order: addons, cluster, then Cloud SQL before the network. The seed root has no destroy workflow.
+
+`destroy-all` (ADR-0039) takes down everything those workflows can, in one run and two approvals, with `all` as the confirmation. It deletes the Gateway and waits until Google has removed the load balancer, then destroys the add-ons root, the cluster root, and the whole data root, each without `-target`. The data root is tried up to three times, because Google releases the private services connection some minutes after Cloud SQL goes. The seed and finops roots stay, so the state bucket, the service accounts, the trust, the budget, and the billing export survive. A run that stops part-way is dispatched again.
 
 ---
 

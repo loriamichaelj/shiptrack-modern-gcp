@@ -19,4 +19,5 @@ Nothing here changes the stack except through a workflow, and nothing prints a s
 | [event-backlog](event-backlog.md) | `events-queue-age` or `events-queue-age-critical` fired |
 | [pod-restarts](pod-restarts.md) | `pod-restarts` fired |
 | [sla-scan-stopped](sla-scan-stopped.md) | `sla-scan-heartbeat` fired |
+| [teardown](teardown.md) | You take the whole stack down to stop the spend |
 | [availability-burn](availability-burn.md) | `slo-availability-fast-burn` or `slo-availability-slow-burn` fired |

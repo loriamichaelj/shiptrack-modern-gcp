@@ -4,7 +4,7 @@ name: destroy-cloud-sql
 # BACKUPS ARE DELETED. Two jobs, each in the `dev` environment and each needing the owner's approval:
 # the first shows the addresses and actions a destroy would make, the second lowers the deletion
 # protection, makes a fresh plan, and applies it. Both fail unless `confirm` is exactly `cloud-sql`.
-# Remove the cluster first. The credentials secrets keep pointing at the old address until the next apply.
+# Remove the cluster first. A targeted destroy also removes what depends on the group; the plan job lists it.
 
 on:
   workflow_dispatch:
